@@ -7,9 +7,10 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "flow",
-	Short: "A task orchestration CLI tool",
-	Long:  `flow is a task orchestration CLI tool that runs workflows defined in YAML configuration files, similar to GitHub Actions.`,
+	Use:          "flow",
+	Short:        "A task orchestration CLI tool",
+	Long:         `flow is a task orchestration CLI tool that runs workflows defined in YAML configuration files, similar to GitHub Actions.`,
+	SilenceUsage: true,
 }
 
 func Execute() {

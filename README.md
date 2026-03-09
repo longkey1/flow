@@ -41,6 +41,7 @@ Workflow files are written in YAML and placed in the `.flow/workflows/` director
 
 ```yaml
 name: workflow-name        # Required
+quiet: true                # Optional: suppress job/step log headers
 jobs:
   job-name:
     needs: [dependency]    # Optional: jobs that must complete first
@@ -128,27 +129,21 @@ jobs:
 
 ## Configuration
 
-An optional `.flow.yaml` file in the project root configures the workflows directory:
-
-```yaml
-dir: .flow  # default
-```
-
-Workflows are loaded from `<dir>/workflows/`. If `.flow.yaml` is not present, the default `.flow/workflows/` is used.
+The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`). Workflows are loaded from `$FLOW_ROOT/workflows/`.
 
 ## Commands
 
 ```
-flow run <workflow>     Run a workflow
-flow version            Show version information
-flow version --short    Show only the version number
+flow run <workflow>            Run a workflow
+flow run <workflow> --debug    Run with detailed output (overrides quiet)
+flow version                   Show version information
+flow version --short           Show only the version number
 ```
 
 ## Project Layout Example
 
 ```
 my-project/
-  .flow.yaml              # Optional configuration
   .flow/
     workflows/
       build.yaml

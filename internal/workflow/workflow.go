@@ -22,6 +22,7 @@ type Job struct {
 
 type Workflow struct {
 	Name     string         `yaml:"name"`
+	Quiet    bool           `yaml:"quiet"`
 	Jobs     map[string]Job `yaml:"-"`
 	JobOrder []string       `yaml:"-"`
 }
@@ -35,6 +36,8 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 		switch key.Value {
 		case "name":
 			w.Name = val.Value
+		case "quiet":
+			w.Quiet = val.Value == "true"
 		case "jobs":
 			w.Jobs = make(map[string]Job)
 			if val.Kind != yaml.MappingNode {

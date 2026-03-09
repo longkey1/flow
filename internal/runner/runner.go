@@ -13,6 +13,7 @@ type Runner struct {
 	stdout io.Writer
 	stderr io.Writer
 	dir    string
+	Quiet  bool
 }
 
 func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
@@ -37,11 +38,15 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 
 		if skip {
 			status[jobName] = "skipped"
-			fmt.Fprintf(r.stdout, "=== Job: %s (skipped) ===\n", jobName)
+			if !r.Quiet {
+				fmt.Fprintf(r.stdout, "=== Job: %s (skipped) ===\n", jobName)
+			}
 			continue
 		}
 
-		fmt.Fprintf(r.stdout, "=== Job: %s ===\n", jobName)
+		if !r.Quiet {
+			fmt.Fprintf(r.stdout, "=== Job: %s ===\n", jobName)
+		}
 
 		stepOutputs := make(map[string]map[string]string)
 		jobFailed := false
@@ -50,7 +55,9 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 			if name == "" {
 				name = step.Run
 			}
-			fmt.Fprintf(r.stdout, "--- Step: %s ---\n", name)
+			if !r.Quiet {
+				fmt.Fprintf(r.stdout, "--- Step: %s ---\n", name)
+			}
 
 			// Create temp file for FLOW_OUTPUT
 			outputFile, err := os.CreateTemp("", "flow-output-*")

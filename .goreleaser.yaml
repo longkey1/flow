@@ -22,9 +22,9 @@ builds:
         goarch: 386
     ldflags:
       - -s -w
-      - -X github.com/longkey1/defer/internal/version.Version={{.Version}}
-      - -X github.com/longkey1/defer/internal/version.CommitSHA={{.Commit}}
-      - -X github.com/longkey1/defer/internal/version.BuildTime={{.Date}}
+      - -X github.com/longkey1/flow/internal/version.Version={{.Version}}
+      - -X github.com/longkey1/flow/internal/version.CommitSHA={{.Commit}}
+      - -X github.com/longkey1/flow/internal/version.BuildTime={{.Date}}
 
 archives:
   - name_template: >-

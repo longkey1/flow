@@ -1,4 +1,4 @@
-module github.com/longkey1/defer
+module github.com/longkey1/flow
 
 go 1.25
 

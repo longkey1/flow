@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/longkey1/defer/internal/version"
+	"github.com/longkey1/flow/internal/version"
 	"github.com/spf13/cobra"
 )
 

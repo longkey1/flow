@@ -7,9 +7,9 @@ import (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "defer",
+	Use:   "flow",
 	Short: "A task orchestration CLI tool",
-	Long:  `defer is a task orchestration CLI tool that runs workflows defined in YAML configuration files, similar to GitHub Actions.`,
+	Long:  `flow is a task orchestration CLI tool that runs workflows defined in YAML configuration files, similar to GitHub Actions.`,
 }
 
 func Execute() {

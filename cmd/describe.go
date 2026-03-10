@@ -74,9 +74,18 @@ var describeCmd = &cobra.Command{
 				for _, step := range job.Steps {
 					name := step.Name
 					if name == "" {
-						name = step.Run
+						if step.Uses != "" {
+							name = "uses: " + step.Uses
+						} else {
+							name = step.Run
+						}
 					}
 					fmt.Fprintf(out, "    - %s\n", name)
+					if step.Uses != "" && len(step.With) > 0 {
+						for k, v := range step.With {
+							fmt.Fprintf(out, "        %s: %s\n", k, v)
+						}
+					}
 				}
 			}
 		}

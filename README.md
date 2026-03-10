@@ -164,6 +164,58 @@ jobs:
 - Outputs are scoped to the job; they cannot be referenced across jobs
 - Unknown step or key references resolve to an empty string
 
+### Actions
+
+Actions allow you to define reusable step groups in separate files, similar to GitHub Actions composite actions. Action files are placed in `.flow/actions/<action-name>/action.yaml`.
+
+#### Defining an action
+
+```yaml
+# .flow/actions/greet/action.yaml
+name: greet
+description: "Generate a greeting"
+
+inputs:
+  name:
+    description: "Who to greet"
+    required: true
+    default: "world"
+
+outputs:
+  greeting:
+    description: "The generated greeting"
+
+runs:
+  steps:
+    - id: greet
+      name: Generate greeting
+      run: echo "greeting=hello ${{ inputs.name }}" >> $FLOW_OUTPUT
+```
+
+#### Using an action in a workflow
+
+Reference an action with `uses` and pass inputs with `with`:
+
+```yaml
+name: greet-workflow
+jobs:
+  greet:
+    steps:
+      - id: my-step
+        uses: ./greet
+        with:
+          name: "Claude"
+      - run: echo "${{ steps.my-step.outputs.greeting }}"
+```
+
+- `uses: ./<action-name>` — references an action in `.flow/actions/<action-name>/action.yaml`
+- `with:` — passes input values to the action (supports `${{ }}` expressions)
+- Action outputs are collected from all action steps and exposed as the calling step's outputs
+- A step cannot have both `run` and `uses`
+- `with` is only valid when `uses` is specified
+- Action steps can reference each other's outputs with `${{ steps.<id>.outputs.<key> }}`
+- Environment variables are merged: workflow env -> job env -> calling step env -> action step env
+
 ### Environment Variables
 
 Environment variables can be defined at three levels: workflow, job, and step. Variables are merged in that order, with later levels overriding earlier ones.
@@ -191,7 +243,7 @@ Merge order: **workflow env** -> **job env** -> **step env** (later levels take 
 
 ## Configuration
 
-The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`). Workflows are loaded from `$FLOW_ROOT/workflows/`.
+The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`). Workflows are loaded from `$FLOW_ROOT/workflows/` and actions from `$FLOW_ROOT/actions/`.
 
 ## Commands
 
@@ -209,6 +261,9 @@ flow version --short                     Show only the version number
 ```
 my-project/
   .flow/
+    actions/
+      greet/
+        action.yaml
     workflows/
       build.yaml
       deploy.yaml

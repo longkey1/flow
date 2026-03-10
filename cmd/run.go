@@ -19,6 +19,14 @@ func workflowsDir(baseDir string) string {
 	return filepath.Join(baseDir, root, "workflows")
 }
 
+func actionsDir(baseDir string) string {
+	root := os.Getenv("FLOW_ROOT")
+	if root == "" {
+		root = ".flow"
+	}
+	return filepath.Join(baseDir, root, "actions")
+}
+
 func parseInputFlags(raw []string) (map[string]string, error) {
 	inputs := make(map[string]string)
 	for _, s := range raw {
@@ -63,6 +71,7 @@ var runCmd = &cobra.Command{
 		debug, _ := cmd.Flags().GetBool("debug")
 		r := runner.New(os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), baseDir)
 		r.Quiet = wf.Quiet && !debug
+		r.ActionsDir = actionsDir(baseDir)
 		return r.Run(wf, inputs)
 	},
 }

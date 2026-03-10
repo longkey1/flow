@@ -2,11 +2,20 @@ package runner
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/longkey1/flow/internal/workflow"
 )
+
+func writeAction(t *testing.T, dir, name, content string) {
+	t.Helper()
+	actionDir := filepath.Join(dir, name)
+	os.MkdirAll(actionDir, 0o755)
+	os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(content), 0o644)
+}
 
 func makeWorkflow(t *testing.T, jobs map[string]workflow.Job, order []string) *workflow.Workflow {
 	t.Helper()
@@ -414,5 +423,216 @@ func TestRunInputOverridesDefault(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "Hi") {
 		t.Errorf("expected 'Hi' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionBasic(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+runs:
+  steps:
+    - run: echo "hello from action"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Uses: "./greet"},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello from action") {
+		t.Errorf("expected 'hello from action' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionInputsWithValues(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+inputs:
+  name:
+    description: "Who to greet"
+    required: true
+runs:
+  steps:
+    - run: echo "hello ${{ inputs.name }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Uses: "./greet", With: map[string]string{"name": "Claude"}},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello Claude") {
+		t.Errorf("expected 'hello Claude' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionInputsDefault(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+inputs:
+  name:
+    default: "world"
+runs:
+  steps:
+    - run: echo "hello ${{ inputs.name }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Uses: "./greet"},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello world") {
+		t.Errorf("expected 'hello world' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionOutputs(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+inputs:
+  name:
+    required: true
+outputs:
+  greeting:
+    description: "The greeting"
+runs:
+  steps:
+    - id: greet
+      run: echo "greeting=hello ${{ inputs.name }}" >> $FLOW_OUTPUT
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Id: "my-step", Uses: "./greet", With: map[string]string{"name": "Claude"}},
+			{Run: `echo "${{ steps.my-step.outputs.greeting }}"`},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello Claude") {
+		t.Errorf("expected 'hello Claude' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionStepOutputsWithinAction(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "multi", `
+name: multi
+runs:
+  steps:
+    - id: step1
+      run: echo "val=from-step1" >> $FLOW_OUTPUT
+    - run: echo "got ${{ steps.step1.outputs.val }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Uses: "./multi"},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "got from-step1") {
+		t.Errorf("expected 'got from-step1' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunActionRequiredInputMissing(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+inputs:
+  name:
+    required: true
+runs:
+  steps:
+    - run: echo "hello ${{ inputs.name }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Uses: "./greet"},
+		}},
+	}, []string{"build"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error for missing required input")
+	}
+}
+
+func TestRunActionWithExpressionExpansion(t *testing.T) {
+	actionsDir := t.TempDir()
+	writeAction(t, actionsDir, "greet", `
+name: greet
+inputs:
+  name:
+    required: true
+runs:
+  steps:
+    - run: echo "hello ${{ inputs.name }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.ActionsDir = actionsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Id: "producer", Run: `echo "val=World" >> $FLOW_OUTPUT`},
+			{Uses: "./greet", With: map[string]string{"name": "${{ steps.producer.outputs.val }}"}},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello World") {
+		t.Errorf("expected 'hello World' in output, got:\n%s", stdout.String())
 	}
 }

@@ -20,6 +20,8 @@ type Step struct {
 	Id   string            `yaml:"id"`
 	Name string            `yaml:"name"`
 	Run  string            `yaml:"run"`
+	Uses string            `yaml:"uses"`
+	With map[string]string `yaml:"with"`
 	Env  map[string]string `yaml:"env"`
 }
 
@@ -122,8 +124,14 @@ func (w *Workflow) Validate() error {
 		}
 		seenIDs := make(map[string]bool)
 		for i, step := range job.Steps {
-			if step.Run == "" {
-				return fmt.Errorf("step %d in job %q must have a run command", i+1, jobName)
+			if step.Run == "" && step.Uses == "" {
+				return fmt.Errorf("step %d in job %q must have a run command or uses reference", i+1, jobName)
+			}
+			if step.Run != "" && step.Uses != "" {
+				return fmt.Errorf("step %d in job %q cannot have both run and uses", i+1, jobName)
+			}
+			if step.Uses == "" && len(step.With) > 0 {
+				return fmt.Errorf("step %d in job %q has with but no uses", i+1, jobName)
 			}
 			if step.Id != "" {
 				if !validIDPattern.MatchString(step.Id) {

@@ -450,3 +450,90 @@ jobs:
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
+
+func TestParseStepUses(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - id: my-step
+        uses: ./my-action
+        with:
+          name: "Claude"
+`)
+	step := wf.Jobs["build"].Steps[0]
+	if step.Uses != "./my-action" {
+		t.Errorf("expected uses './my-action', got %q", step.Uses)
+	}
+	if step.With["name"] != "Claude" {
+		t.Errorf("expected with name='Claude', got %q", step.With["name"])
+	}
+}
+
+func TestValidateRunAndUsesBothError(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+        uses: ./my-action
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for both run and uses")
+	}
+	if !strings.Contains(err.Error(), "cannot have both run and uses") {
+		t.Errorf("expected 'cannot have both run and uses' error, got: %v", err)
+	}
+}
+
+func TestValidateNoRunNoUsesError(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - id: empty
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for step without run or uses")
+	}
+	if !strings.Contains(err.Error(), "must have a run command or uses reference") {
+		t.Errorf("expected 'must have a run command or uses reference' error, got: %v", err)
+	}
+}
+
+func TestValidateWithWithoutUsesError(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+        with:
+          key: value
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for with without uses")
+	}
+	if !strings.Contains(err.Error(), "has with but no uses") {
+		t.Errorf("expected 'has with but no uses' error, got: %v", err)
+	}
+}
+
+func TestValidateUsesOnly(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - uses: ./my-action
+`)
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}

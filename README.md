@@ -57,6 +57,37 @@ jobs:
           STEP_VAR: value
 ```
 
+### Inputs
+
+Workflows can declare inputs that are passed via the `--input` / `-i` flag at runtime:
+
+```yaml
+name: greet
+inputs:
+  name:
+    description: "Who to greet"
+    required: true
+  greeting:
+    description: "Greeting message"
+    default: "Hello"
+jobs:
+  greet:
+    steps:
+      - run: echo "${{ inputs.greeting }}, ${{ inputs.name }}!"
+```
+
+```bash
+flow run greet -i name=World                    # uses default greeting "Hello"
+flow run greet -i name=Alice -i greeting=Hi     # overrides default
+flow run greet                                  # error: required input "name" not provided
+```
+
+- `required: true` — the input must be provided; an error occurs if missing and no default is set
+- `default: value` — used when the input is not provided
+- Access input values with `${{ inputs.key }}` expressions
+- Input names must match `^[a-zA-Z0-9_-]+$`
+- Use `flow describe <workflow>` to see available inputs for a workflow
+
 ### Jobs
 
 Jobs are executed sequentially in topological order based on their dependencies. When multiple jobs are at the same dependency level, they run in YAML declaration order.
@@ -165,10 +196,12 @@ The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`).
 ## Commands
 
 ```
-flow run <workflow>            Run a workflow
-flow run <workflow> --debug    Run with detailed output (overrides quiet)
-flow version                   Show version information
-flow version --short           Show only the version number
+flow run <workflow>                      Run a workflow
+flow run <workflow> -i key=value         Pass input values (repeatable)
+flow run <workflow> --debug              Run with detailed output (overrides quiet)
+flow describe <workflow>                 Show workflow details (inputs, jobs, steps)
+flow version                             Show version information
+flow version --short                     Show only the version number
 ```
 
 ## Project Layout Example

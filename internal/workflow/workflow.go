@@ -8,6 +8,13 @@ import (
 )
 
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
+var validInputNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+
+type Input struct {
+	Description string `yaml:"description"`
+	Required    bool   `yaml:"required"`
+	Default     string `yaml:"default"`
+}
 
 type Step struct {
 	Id   string            `yaml:"id"`
@@ -26,6 +33,7 @@ type Workflow struct {
 	Name     string            `yaml:"name"`
 	Quiet    bool              `yaml:"quiet"`
 	Env      map[string]string `yaml:"-"`
+	Inputs   map[string]Input  `yaml:"-"`
 	Jobs     map[string]Job    `yaml:"-"`
 	JobOrder []string          `yaml:"-"`
 }
@@ -45,6 +53,11 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 			w.Env = make(map[string]string)
 			if err := val.Decode(&w.Env); err != nil {
 				return fmt.Errorf("decoding workflow env: %w", err)
+			}
+		case "inputs":
+			w.Inputs = make(map[string]Input)
+			if err := val.Decode(&w.Inputs); err != nil {
+				return fmt.Errorf("decoding workflow inputs: %w", err)
 			}
 		case "jobs":
 			w.Jobs = make(map[string]Job)
@@ -94,6 +107,11 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 func (w *Workflow) Validate() error {
 	if w.Name == "" {
 		return fmt.Errorf("workflow name is required")
+	}
+	for name := range w.Inputs {
+		if !validInputNamePattern.MatchString(name) {
+			return fmt.Errorf("input %q has invalid name: must contain only alphanumeric characters, hyphens, and underscores", name)
+		}
 	}
 	if len(w.Jobs) == 0 {
 		return fmt.Errorf("workflow must have at least one job")

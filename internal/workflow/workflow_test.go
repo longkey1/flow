@@ -366,3 +366,87 @@ jobs:
 		t.Errorf("expected a before c, got order %v", wf.JobOrder)
 	}
 }
+
+func TestParseInputs(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+inputs:
+  name:
+    description: "Who to greet"
+    required: true
+  greeting:
+    description: "Greeting message"
+    default: "Hello"
+jobs:
+  greet:
+    steps:
+      - run: echo hello
+`)
+	if len(wf.Inputs) != 2 {
+		t.Fatalf("expected 2 inputs, got %d", len(wf.Inputs))
+	}
+	nameInput := wf.Inputs["name"]
+	if nameInput.Description != "Who to greet" {
+		t.Errorf("expected description 'Who to greet', got %q", nameInput.Description)
+	}
+	if !nameInput.Required {
+		t.Error("expected name input to be required")
+	}
+	greetingInput := wf.Inputs["greeting"]
+	if greetingInput.Default != "Hello" {
+		t.Errorf("expected default 'Hello', got %q", greetingInput.Default)
+	}
+}
+
+func TestParseInputsEmpty(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if len(wf.Inputs) != 0 {
+		t.Errorf("expected no inputs, got %d", len(wf.Inputs))
+	}
+}
+
+func TestValidateInvalidInputName(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+inputs:
+  "invalid name!":
+    description: "bad"
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid input name")
+	}
+	if !strings.Contains(err.Error(), "invalid name") {
+		t.Errorf("expected 'invalid name' error, got: %v", err)
+	}
+}
+
+func TestValidateValidInputNames(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+inputs:
+  my-input:
+    description: "with hyphen"
+  my_input:
+    description: "with underscore"
+  myInput123:
+    description: "alphanumeric"
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}

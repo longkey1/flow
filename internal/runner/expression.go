@@ -2,11 +2,12 @@ package runner
 
 import "regexp"
 
-var expressionPattern = regexp.MustCompile(`\$\{\{\s*steps\.([a-zA-Z0-9-]+)\.outputs\.([a-zA-Z0-9_-]+)\s*\}\}`)
+var stepsExpressionPattern = regexp.MustCompile(`\$\{\{\s*steps\.([a-zA-Z0-9-]+)\.outputs\.([a-zA-Z0-9_-]+)\s*\}\}`)
+var inputsExpressionPattern = regexp.MustCompile(`\$\{\{\s*inputs\.([a-zA-Z0-9_-]+)\s*\}\}`)
 
-func expandExpressions(command string, stepOutputs map[string]map[string]string) string {
-	return expressionPattern.ReplaceAllStringFunc(command, func(match string) string {
-		parts := expressionPattern.FindStringSubmatch(match)
+func expandExpressions(command string, stepOutputs map[string]map[string]string, inputs map[string]string) string {
+	result := stepsExpressionPattern.ReplaceAllStringFunc(command, func(match string) string {
+		parts := stepsExpressionPattern.FindStringSubmatch(match)
 		if len(parts) != 3 {
 			return match
 		}
@@ -19,4 +20,18 @@ func expandExpressions(command string, stepOutputs map[string]map[string]string)
 		}
 		return ""
 	})
+
+	result = inputsExpressionPattern.ReplaceAllStringFunc(result, func(match string) string {
+		parts := inputsExpressionPattern.FindStringSubmatch(match)
+		if len(parts) != 2 {
+			return match
+		}
+		key := parts[1]
+		if val, ok := inputs[key]; ok {
+			return val
+		}
+		return ""
+	})
+
+	return result
 }

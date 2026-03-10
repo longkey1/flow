@@ -46,7 +46,59 @@ func TestExpandExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := expandExpressions(tt.input, outputs)
+			got := expandExpressions(tt.input, outputs, nil)
+			if got != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestExpandExpressionsInputs(t *testing.T) {
+	inputs := map[string]string{
+		"name":     "World",
+		"greeting": "Hi",
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "basic input substitution",
+			input:    `echo "${{ inputs.name }}"`,
+			expected: `echo "World"`,
+		},
+		{
+			name:     "no spaces in braces",
+			input:    `echo "${{inputs.greeting}}"`,
+			expected: `echo "Hi"`,
+		},
+		{
+			name:     "multiple inputs",
+			input:    `echo "${{ inputs.greeting }}, ${{ inputs.name }}!"`,
+			expected: `echo "Hi, World!"`,
+		},
+		{
+			name:     "unknown input returns empty",
+			input:    `echo "${{ inputs.unknown }}"`,
+			expected: `echo ""`,
+		},
+		{
+			name:     "mixed steps and inputs",
+			input:    `echo "${{ steps.s1.outputs.key }} ${{ inputs.name }}"`,
+			expected: `echo "val World"`,
+		},
+	}
+
+	stepOutputs := map[string]map[string]string{
+		"s1": {"key": "val"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandExpressions(tt.input, stepOutputs, inputs)
 			if got != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, got)
 			}

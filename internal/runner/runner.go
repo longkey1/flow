@@ -20,7 +20,13 @@ func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
 	return &Runner{stdin: stdin, stdout: stdout, stderr: stderr, dir: dir}
 }
 
-func (r *Runner) Run(wf *workflow.Workflow) error {
+func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
+	// Resolve inputs: apply defaults and validate required
+	resolvedInputs, err := resolveInputs(wf, inputs)
+	if err != nil {
+		return err
+	}
+
 	status := make(map[string]string) // "success", "failed", "skipped"
 	var failedJobs []string
 
@@ -71,7 +77,7 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 			outputFile.Close()
 
 			// Expand expressions in the command
-			command := expandExpressions(step.Run, stepOutputs)
+			command := expandExpressions(step.Run, stepOutputs, resolvedInputs)
 
 			// Merge workflow env → job env → step env
 			stepEnv := mergeEnv(jobEnv, step.Env)
@@ -109,6 +115,21 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 		return fmt.Errorf("jobs failed: %v", failedJobs)
 	}
 	return nil
+}
+
+// resolveInputs validates and resolves input values, applying defaults where needed.
+func resolveInputs(wf *workflow.Workflow, provided map[string]string) (map[string]string, error) {
+	resolved := make(map[string]string)
+	for name, def := range wf.Inputs {
+		if val, ok := provided[name]; ok {
+			resolved[name] = val
+		} else if def.Default != "" {
+			resolved[name] = def.Default
+		} else if def.Required {
+			return nil, fmt.Errorf("required input %q is not provided", name)
+		}
+	}
+	return resolved, nil
 }
 
 // mergeEnv merges two env maps. Values in override take precedence.

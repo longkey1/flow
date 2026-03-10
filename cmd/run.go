@@ -1,8 +1,10 @@
 package cmd
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/longkey1/flow/internal/runner"
 	"github.com/longkey1/flow/internal/workflow"
@@ -15,6 +17,18 @@ func workflowsDir(baseDir string) string {
 		root = ".flow"
 	}
 	return filepath.Join(baseDir, root, "workflows")
+}
+
+func parseInputFlags(raw []string) (map[string]string, error) {
+	inputs := make(map[string]string)
+	for _, s := range raw {
+		idx := strings.IndexByte(s, '=')
+		if idx < 1 {
+			return nil, fmt.Errorf("invalid input format %q: must be key=value", s)
+		}
+		inputs[s[:idx]] = s[idx+1:]
+	}
+	return inputs, nil
 }
 
 var runCmd = &cobra.Command{
@@ -40,14 +54,21 @@ var runCmd = &cobra.Command{
 			return err
 		}
 
+		inputFlags, _ := cmd.Flags().GetStringArray("input")
+		inputs, err := parseInputFlags(inputFlags)
+		if err != nil {
+			return err
+		}
+
 		debug, _ := cmd.Flags().GetBool("debug")
 		r := runner.New(os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), baseDir)
 		r.Quiet = wf.Quiet && !debug
-		return r.Run(wf)
+		return r.Run(wf, inputs)
 	},
 }
 
 func init() {
 	runCmd.Flags().Bool("debug", false, "Show detailed output regardless of workflow quiet setting")
+	runCmd.Flags().StringArrayP("input", "i", nil, "Input values in key=value format (can be specified multiple times)")
 	rootCmd.AddCommand(runCmd)
 }

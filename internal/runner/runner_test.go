@@ -27,7 +27,7 @@ func TestRunNoDependencies(t *testing.T) {
 		"b": {Steps: []workflow.Step{{Run: "echo b"}}},
 	}, []string{"a", "b"})
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := stdout.String()
@@ -46,7 +46,7 @@ func TestRunWithDependenciesAllSuccess(t *testing.T) {
 		"deploy": {Needs: []string{"test"}, Steps: []workflow.Step{{Run: "echo deploy"}}},
 	}, []string{"build", "test", "deploy"})
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := stdout.String()
@@ -67,7 +67,7 @@ func TestRunDependencyFailedSkipsDependents(t *testing.T) {
 		"test":  {Needs: []string{"build"}, Steps: []workflow.Step{{Run: "echo test"}}},
 	}, []string{"build", "test"})
 
-	err := r.Run(wf)
+	err := r.Run(wf, nil)
 	if err == nil {
 		t.Fatal("expected error when job fails")
 	}
@@ -87,7 +87,7 @@ func TestRunIndependentJobsRunDespiteFailure(t *testing.T) {
 		"test":       {Needs: []string{"build"}, Steps: []workflow.Step{{Run: "echo test"}}},
 	}, []string{"build", "independent", "test"})
 
-	err := r.Run(wf)
+	err := r.Run(wf, nil)
 	if err == nil {
 		t.Fatal("expected error when job fails")
 	}
@@ -111,7 +111,7 @@ func TestRunStepOutputs(t *testing.T) {
 		}},
 	}, []string{"build"})
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "hello world") {
@@ -130,7 +130,7 @@ func TestRunStepOutputsMultipleKeys(t *testing.T) {
 		}},
 	}, []string{"build"})
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "flow-2.0") {
@@ -148,7 +148,7 @@ func TestRunStepOutputsUnknownStepReturnsEmpty(t *testing.T) {
 		}},
 	}, []string{"build"})
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "[]") {
@@ -169,7 +169,7 @@ func TestRunWorkflowEnv(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "from_workflow") {
@@ -192,7 +192,7 @@ func TestRunJobEnv(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "from_job") {
@@ -214,7 +214,7 @@ func TestRunStepEnv(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "from_step") {
@@ -240,7 +240,7 @@ func TestRunEnvOverride(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := strings.TrimSpace(stdout.String())
@@ -265,7 +265,7 @@ func TestRunEnvJobOverridesWorkflow(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := strings.TrimSpace(stdout.String())
@@ -292,7 +292,7 @@ func TestRunEnvAllLevelsMerged(t *testing.T) {
 		JobOrder: []string{"build"},
 	}
 
-	if err := r.Run(wf); err != nil {
+	if err := r.Run(wf, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !strings.Contains(stdout.String(), "w j s") {
@@ -310,7 +310,7 @@ func TestRunTransitiveSkip(t *testing.T) {
 		"c": {Needs: []string{"b"}, Steps: []workflow.Step{{Run: "echo c"}}},
 	}, []string{"a", "b", "c"})
 
-	err := r.Run(wf)
+	err := r.Run(wf, nil)
 	if err == nil {
 		t.Fatal("expected error when job fails")
 	}
@@ -320,5 +320,99 @@ func TestRunTransitiveSkip(t *testing.T) {
 	}
 	if !strings.Contains(out, "=== Job: c (skipped) ===") {
 		t.Errorf("expected c to be skipped, got:\n%s", out)
+	}
+}
+
+func TestRunWithInputs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"name": {Description: "Who to greet", Required: true},
+		},
+		Jobs: map[string]workflow.Job{
+			"greet": {Steps: []workflow.Step{{Run: `echo "${{ inputs.name }}"`}}},
+		},
+		JobOrder: []string{"greet"},
+	}
+
+	if err := r.Run(wf, map[string]string{"name": "World"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "World") {
+		t.Errorf("expected 'World' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunRequiredInputMissing(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"name": {Required: true},
+		},
+		Jobs: map[string]workflow.Job{
+			"greet": {Steps: []workflow.Step{{Run: `echo hello`}}},
+		},
+		JobOrder: []string{"greet"},
+	}
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error for missing required input")
+	}
+	if !strings.Contains(err.Error(), "required input") {
+		t.Errorf("expected 'required input' error, got: %v", err)
+	}
+}
+
+func TestRunInputDefault(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"greeting": {Default: "Hello"},
+			"name":     {Required: true},
+		},
+		Jobs: map[string]workflow.Job{
+			"greet": {Steps: []workflow.Step{{Run: `echo "${{ inputs.greeting }}, ${{ inputs.name }}!"`}}},
+		},
+		JobOrder: []string{"greet"},
+	}
+
+	if err := r.Run(wf, map[string]string{"name": "Alice"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Hello, Alice!") {
+		t.Errorf("expected 'Hello, Alice!' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunInputOverridesDefault(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"greeting": {Default: "Hello"},
+		},
+		Jobs: map[string]workflow.Job{
+			"greet": {Steps: []workflow.Step{{Run: `echo "${{ inputs.greeting }}"`}}},
+		},
+		JobOrder: []string{"greet"},
+	}
+
+	if err := r.Run(wf, map[string]string{"greeting": "Hi"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Hi") {
+		t.Errorf("expected 'Hi' in output, got:\n%s", stdout.String())
 	}
 }

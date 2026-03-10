@@ -42,13 +42,19 @@ Workflow files are written in YAML and placed in the `.flow/workflows/` director
 ```yaml
 name: workflow-name        # Required
 quiet: true                # Optional: suppress job/step log headers
+env:                        # Optional: workflow-level environment variables
+  GLOBAL_VAR: value
 jobs:
   job-name:
     needs: [dependency]    # Optional: jobs that must complete first
+    env:                    # Optional: job-level environment variables
+      JOB_VAR: value
     steps:
       - id: step-id        # Optional: identifier for referencing outputs
         name: Display Name  # Optional: shown in output
         run: echo "hello"   # Required: shell command to execute
+        env:                # Optional: step-level environment variables
+          STEP_VAR: value
 ```
 
 ### Jobs
@@ -126,6 +132,31 @@ jobs:
 - Step `id` must match `^[a-zA-Z0-9-]+$`
 - Outputs are scoped to the job; they cannot be referenced across jobs
 - Unknown step or key references resolve to an empty string
+
+### Environment Variables
+
+Environment variables can be defined at three levels: workflow, job, and step. Variables are merged in that order, with later levels overriding earlier ones.
+
+```yaml
+name: env-example
+env:
+  APP_NAME: myapp
+  LOG_LEVEL: info
+
+jobs:
+  build:
+    env:
+      LOG_LEVEL: debug       # overrides workflow-level LOG_LEVEL
+      BUILD_DIR: ./dist
+    steps:
+      - name: Build
+        env:
+          BUILD_DIR: ./out    # overrides job-level BUILD_DIR
+        run: echo "$APP_NAME $LOG_LEVEL $BUILD_DIR"
+        # outputs: myapp debug ./out
+```
+
+Merge order: **workflow env** -> **job env** -> **step env** (later levels take precedence).
 
 ## Configuration
 

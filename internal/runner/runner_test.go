@@ -156,6 +156,150 @@ func TestRunStepOutputsUnknownStepReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestRunWorkflowEnv(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Env:  map[string]string{"WF_VAR": "from_workflow"},
+		Jobs: map[string]workflow.Job{
+			"build": {Steps: []workflow.Step{{Run: `echo "$WF_VAR"`}}},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "from_workflow") {
+		t.Errorf("expected 'from_workflow' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunJobEnv(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Jobs: map[string]workflow.Job{
+			"build": {
+				Env:   map[string]string{"JOB_VAR": "from_job"},
+				Steps: []workflow.Step{{Run: `echo "$JOB_VAR"`}},
+			},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "from_job") {
+		t.Errorf("expected 'from_job' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunStepEnv(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Jobs: map[string]workflow.Job{
+			"build": {Steps: []workflow.Step{
+				{Env: map[string]string{"STEP_VAR": "from_step"}, Run: `echo "$STEP_VAR"`},
+			}},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "from_step") {
+		t.Errorf("expected 'from_step' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunEnvOverride(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Env:  map[string]string{"MY_VAR": "workflow_val"},
+		Jobs: map[string]workflow.Job{
+			"build": {
+				Env: map[string]string{"MY_VAR": "job_val"},
+				Steps: []workflow.Step{
+					{Env: map[string]string{"MY_VAR": "step_val"}, Run: `echo "$MY_VAR"`},
+				},
+			},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := strings.TrimSpace(stdout.String())
+	if !strings.Contains(out, "step_val") {
+		t.Errorf("expected step env to override, got:\n%s", out)
+	}
+}
+
+func TestRunEnvJobOverridesWorkflow(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Env:  map[string]string{"MY_VAR": "workflow_val"},
+		Jobs: map[string]workflow.Job{
+			"build": {
+				Env:   map[string]string{"MY_VAR": "job_val"},
+				Steps: []workflow.Step{{Run: `echo "$MY_VAR"`}},
+			},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := strings.TrimSpace(stdout.String())
+	if !strings.Contains(out, "job_val") {
+		t.Errorf("expected job env to override workflow, got:\n%s", out)
+	}
+}
+
+func TestRunEnvAllLevelsMerged(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Env:  map[string]string{"WF": "w"},
+		Jobs: map[string]workflow.Job{
+			"build": {
+				Env: map[string]string{"JB": "j"},
+				Steps: []workflow.Step{
+					{Env: map[string]string{"ST": "s"}, Run: `echo "$WF $JB $ST"`},
+				},
+			},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "w j s") {
+		t.Errorf("expected 'w j s' in output, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunTransitiveSkip(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	r := New(nil, &stdout, &stderr, "")

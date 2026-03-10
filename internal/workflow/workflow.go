@@ -10,21 +10,24 @@ import (
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 
 type Step struct {
-	Id   string `yaml:"id"`
-	Name string `yaml:"name"`
-	Run  string `yaml:"run"`
+	Id   string            `yaml:"id"`
+	Name string            `yaml:"name"`
+	Run  string            `yaml:"run"`
+	Env  map[string]string `yaml:"env"`
 }
 
 type Job struct {
-	Needs []string `yaml:"-"`
-	Steps []Step   `yaml:"steps"`
+	Needs []string          `yaml:"-"`
+	Steps []Step            `yaml:"steps"`
+	Env   map[string]string `yaml:"env"`
 }
 
 type Workflow struct {
-	Name     string         `yaml:"name"`
-	Quiet    bool           `yaml:"quiet"`
-	Jobs     map[string]Job `yaml:"-"`
-	JobOrder []string       `yaml:"-"`
+	Name     string            `yaml:"name"`
+	Quiet    bool              `yaml:"quiet"`
+	Env      map[string]string `yaml:"-"`
+	Jobs     map[string]Job    `yaml:"-"`
+	JobOrder []string          `yaml:"-"`
 }
 
 func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
@@ -38,6 +41,11 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 			w.Name = val.Value
 		case "quiet":
 			w.Quiet = val.Value == "true"
+		case "env":
+			w.Env = make(map[string]string)
+			if err := val.Decode(&w.Env); err != nil {
+				return fmt.Errorf("decoding workflow env: %w", err)
+			}
 		case "jobs":
 			w.Jobs = make(map[string]Job)
 			if val.Kind != yaml.MappingNode {

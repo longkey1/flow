@@ -257,6 +257,83 @@ jobs:
 	}
 }
 
+func TestParseWorkflowEnv(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+env:
+  GLOBAL_VAR: value1
+  ANOTHER: value2
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if len(wf.Env) != 2 {
+		t.Fatalf("expected 2 workflow env vars, got %d", len(wf.Env))
+	}
+	if wf.Env["GLOBAL_VAR"] != "value1" {
+		t.Errorf("expected GLOBAL_VAR=value1, got %q", wf.Env["GLOBAL_VAR"])
+	}
+	if wf.Env["ANOTHER"] != "value2" {
+		t.Errorf("expected ANOTHER=value2, got %q", wf.Env["ANOTHER"])
+	}
+}
+
+func TestParseJobEnv(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    env:
+      JOB_VAR: jobval
+    steps:
+      - run: echo build
+`)
+	if wf.Jobs["build"].Env["JOB_VAR"] != "jobval" {
+		t.Errorf("expected JOB_VAR=jobval, got %q", wf.Jobs["build"].Env["JOB_VAR"])
+	}
+}
+
+func TestParseStepEnv(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - env:
+          STEP_VAR: stepval
+        run: echo build
+`)
+	if wf.Jobs["build"].Steps[0].Env["STEP_VAR"] != "stepval" {
+		t.Errorf("expected STEP_VAR=stepval, got %q", wf.Jobs["build"].Steps[0].Env["STEP_VAR"])
+	}
+}
+
+func TestParseAllLevelEnv(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+env:
+  GLOBAL: g
+jobs:
+  build:
+    env:
+      JOB: j
+    steps:
+      - env:
+          STEP: s
+        run: echo build
+`)
+	if wf.Env["GLOBAL"] != "g" {
+		t.Errorf("expected workflow env GLOBAL=g, got %q", wf.Env["GLOBAL"])
+	}
+	if wf.Jobs["build"].Env["JOB"] != "j" {
+		t.Errorf("expected job env JOB=j, got %q", wf.Jobs["build"].Env["JOB"])
+	}
+	if wf.Jobs["build"].Steps[0].Env["STEP"] != "s" {
+		t.Errorf("expected step env STEP=s, got %q", wf.Jobs["build"].Steps[0].Env["STEP"])
+	}
+}
+
 func TestResolveOrderIndependentJobs(t *testing.T) {
 	wf := parseWorkflow(t, `
 name: test

@@ -48,6 +48,9 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 			fmt.Fprintf(r.stdout, "=== Job: %s ===\n", jobName)
 		}
 
+		// Merge workflow env → job env
+		jobEnv := mergeEnv(wf.Env, job.Env)
+
 		stepOutputs := make(map[string]map[string]string)
 		jobFailed := false
 		for _, step := range job.Steps {
@@ -70,7 +73,13 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 			// Expand expressions in the command
 			command := expandExpressions(step.Run, stepOutputs)
 
-			env := []string{"FLOW_OUTPUT=" + outputPath}
+			// Merge workflow env → job env → step env
+			stepEnv := mergeEnv(jobEnv, step.Env)
+			env := make([]string, 0, len(stepEnv)+1)
+			for k, v := range stepEnv {
+				env = append(env, k+"="+v)
+			}
+			env = append(env, "FLOW_OUTPUT="+outputPath)
 			if err := runShell(command, r.dir, r.stdin, r.stdout, r.stderr, env); err != nil {
 				os.Remove(outputPath)
 				status[jobName] = "failed"
@@ -100,4 +109,19 @@ func (r *Runner) Run(wf *workflow.Workflow) error {
 		return fmt.Errorf("jobs failed: %v", failedJobs)
 	}
 	return nil
+}
+
+// mergeEnv merges two env maps. Values in override take precedence.
+func mergeEnv(base, override map[string]string) map[string]string {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	merged := make(map[string]string, len(base)+len(override))
+	for k, v := range base {
+		merged[k] = v
+	}
+	for k, v := range override {
+		merged[k] = v
+	}
+	return merged
 }

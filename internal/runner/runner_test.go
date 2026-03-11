@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/longkey1/flow/internal/workflow"
 )
@@ -91,9 +92,9 @@ func TestRunIndependentJobsRunDespiteFailure(t *testing.T) {
 	r := New(nil, &stdout, &stderr, "")
 
 	wf := makeWorkflow(t, map[string]workflow.Job{
-		"build":      {Steps: []workflow.Step{{Run: "exit 1"}}},
+		"build":       {Steps: []workflow.Step{{Run: "exit 1"}}},
 		"independent": {Steps: []workflow.Step{{Run: "echo independent"}}},
-		"test":       {Needs: []string{"build"}, Steps: []workflow.Step{{Run: "echo test"}}},
+		"test":        {Needs: []string{"build"}, Steps: []workflow.Step{{Run: "echo test"}}},
 	}, []string{"build", "independent", "test"})
 
 	err := r.Run(wf, nil)
@@ -634,5 +635,140 @@ runs:
 	}
 	if !strings.Contains(stdout.String(), "hello World") {
 		t.Errorf("expected 'hello World' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunParallelIndependentJobs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.Quiet = true
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"a": {Steps: []workflow.Step{{Run: "sleep 0.5 && echo a"}}},
+		"b": {Steps: []workflow.Step{{Run: "sleep 0.5 && echo b"}}},
+		"c": {Steps: []workflow.Step{{Run: "sleep 0.5 && echo c"}}},
+	}, []string{"a", "b", "c"})
+
+	start := time.Now()
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// If run sequentially, would take ~1.5s; parallel should be ~0.5s
+	if elapsed > 1200*time.Millisecond {
+		t.Errorf("expected parallel execution (<1.2s), took %v", elapsed)
+	}
+
+	out := stdout.String()
+	if !strings.Contains(out, "a") || !strings.Contains(out, "b") || !strings.Contains(out, "c") {
+		t.Errorf("expected all jobs to produce output, got:\n%s", out)
+	}
+}
+
+func TestRunParallelNoOutputInterleaving(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"a": {Steps: []workflow.Step{
+			{Run: "echo a-line1"},
+			{Run: "echo a-line2"},
+		}},
+		"b": {Steps: []workflow.Step{
+			{Run: "echo b-line1"},
+			{Run: "echo b-line2"},
+		}},
+	}, []string{"a", "b"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	out := stdout.String()
+	// Each job's output should be contiguous (not interleaved)
+	aIdx1 := strings.Index(out, "a-line1")
+	aIdx2 := strings.Index(out, "a-line2")
+	bIdx1 := strings.Index(out, "b-line1")
+	bIdx2 := strings.Index(out, "b-line2")
+
+	if aIdx1 < 0 || aIdx2 < 0 || bIdx1 < 0 || bIdx2 < 0 {
+		t.Fatalf("expected all output lines, got:\n%s", out)
+	}
+
+	// a's lines should be together, b's lines should be together
+	aContiguous := (aIdx1 < aIdx2) && (aIdx2 < bIdx1 || bIdx2 < aIdx1)
+	bContiguous := (bIdx1 < bIdx2) && (bIdx2 < aIdx1 || aIdx2 < bIdx1)
+	if !aContiguous || !bContiguous {
+		t.Errorf("expected non-interleaved output, got:\n%s", out)
+	}
+}
+
+func TestRunParallelDiamondDependency(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"setup":  {Steps: []workflow.Step{{Run: "echo setup"}}},
+		"lint":   {Needs: []string{"setup"}, Steps: []workflow.Step{{Run: "sleep 0.3 && echo lint"}}},
+		"test":   {Needs: []string{"setup"}, Steps: []workflow.Step{{Run: "sleep 0.3 && echo test"}}},
+		"deploy": {Needs: []string{"lint", "test"}, Steps: []workflow.Step{{Run: "echo deploy"}}},
+	}, []string{"setup", "lint", "test", "deploy"})
+
+	start := time.Now()
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// lint and test run in parallel after setup, then deploy
+	// Sequential: ~0.9s; Parallel: ~0.6s
+	if elapsed > 900*time.Millisecond {
+		t.Errorf("expected diamond parallel execution (<0.9s), took %v", elapsed)
+	}
+
+	out := stdout.String()
+	setupIdx := strings.Index(out, "setup")
+	deployIdx := strings.Index(out, "deploy")
+	lintIdx := strings.Index(out, "lint")
+	testIdx := strings.Index(out, "test")
+	if setupIdx < 0 || deployIdx < 0 || lintIdx < 0 || testIdx < 0 {
+		t.Fatalf("expected all jobs output, got:\n%s", out)
+	}
+	if setupIdx > lintIdx || setupIdx > testIdx {
+		t.Errorf("expected setup before lint and test, got:\n%s", out)
+	}
+	if lintIdx > deployIdx || testIdx > deployIdx {
+		t.Errorf("expected lint and test before deploy, got:\n%s", out)
+	}
+}
+
+func TestRunParallelFailedJobSkipsDependents(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build":  {Steps: []workflow.Step{{Run: "exit 1"}}},
+		"test":   {Needs: []string{"build"}, Steps: []workflow.Step{{Run: "echo test"}}},
+		"deploy": {Needs: []string{"test"}, Steps: []workflow.Step{{Run: "echo deploy"}}},
+		"lint":   {Steps: []workflow.Step{{Run: "echo lint"}}},
+	}, []string{"build", "test", "deploy", "lint"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when job fails")
+	}
+
+	out := stdout.String()
+	// lint (independent) should still run
+	if !strings.Contains(out, "lint") {
+		t.Errorf("expected lint to run, got:\n%s", out)
+	}
+	// test and deploy should be skipped
+	if !strings.Contains(out, "=== Job: test (skipped) ===") {
+		t.Errorf("expected test to be skipped, got:\n%s", out)
+	}
+	if !strings.Contains(out, "=== Job: deploy (skipped) ===") {
+		t.Errorf("expected deploy to be skipped, got:\n%s", out)
 	}
 }

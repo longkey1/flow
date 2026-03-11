@@ -90,7 +90,7 @@ flow run greet                                  # error: required input "name" n
 
 ### Jobs
 
-Jobs are executed sequentially in topological order based on their dependencies. When multiple jobs are at the same dependency level, they run in YAML declaration order.
+Jobs run in parallel whenever possible. Jobs with no dependencies start immediately, while jobs with `needs` wait for their dependencies to complete before starting. This enables patterns like `setup → [lint, test] (parallel) → deploy`.
 
 ```yaml
 name: build-and-deploy
@@ -99,16 +99,23 @@ jobs:
     steps:
       - run: make build
 
+  lint:
+    needs: build
+    steps:
+      - run: make lint
+
   test:
     needs: build
     steps:
       - run: make test
 
   deploy:
-    needs: test
+    needs: [lint, test]
     steps:
       - run: make deploy
 ```
+
+In this example, `lint` and `test` run in parallel after `build` completes, and `deploy` waits for both to finish.
 
 The `needs` field accepts a single string or a list:
 
@@ -118,6 +125,8 @@ needs: [build, lint]  # multiple dependencies
 ```
 
 If a job fails, all dependent jobs are skipped. Independent jobs continue to run.
+
+Each job's output (stdout/stderr) is buffered and flushed as a unit when the job completes, preventing interleaved output from parallel jobs.
 
 ### Steps
 
@@ -159,6 +168,21 @@ jobs:
       - name: Use version
         run: echo "Building ${{ steps.version.outputs.tag }}"
 ```
+
+For multiline values, use the delimiter syntax (similar to GitHub Actions):
+
+```yaml
+steps:
+  - id: changelog
+    run: |
+      echo "body<<EOF" >> $FLOW_OUTPUT
+      git log --oneline -5 >> $FLOW_OUTPUT
+      echo "EOF" >> $FLOW_OUTPUT
+
+  - run: echo "${{ steps.changelog.outputs.body }}"
+```
+
+The format is `KEY<<DELIMITER`, followed by the value lines, followed by `DELIMITER` on its own line. Any string can be used as the delimiter.
 
 - Step `id` must match `^[a-zA-Z0-9-]+$`
 - Outputs are scoped to the job; they cannot be referenced across jobs

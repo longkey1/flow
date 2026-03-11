@@ -1,10 +1,12 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/longkey1/flow/internal/action"
 	"github.com/longkey1/flow/internal/workflow"
@@ -32,106 +34,145 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 
 	status := make(map[string]string) // "success", "failed", "skipped"
 	var failedJobs []string
+	var mu sync.Mutex
 
+	// Create done channels for each job
+	done := make(map[string]chan struct{})
 	for _, jobName := range wf.JobOrder {
-		job := wf.Jobs[jobName]
+		done[jobName] = make(chan struct{})
+	}
 
-		// Check if all dependencies succeeded
-		skip := false
-		for _, need := range job.Needs {
-			if status[need] != "success" {
-				skip = true
-				break
-			}
-		}
+	var wg sync.WaitGroup
+	for _, jobName := range wf.JobOrder {
+		wg.Add(1)
+		go func(jobName string) {
+			defer wg.Done()
+			defer close(done[jobName])
 
-		if skip {
-			status[jobName] = "skipped"
-			if !r.Quiet {
-				fmt.Fprintf(r.stdout, "=== Job: %s (skipped) ===\n", jobName)
-			}
-			continue
-		}
+			job := wf.Jobs[jobName]
 
-		if !r.Quiet {
-			fmt.Fprintf(r.stdout, "=== Job: %s ===\n", jobName)
-		}
-
-		// Merge workflow env → job env
-		jobEnv := mergeEnv(wf.Env, job.Env)
-
-		stepOutputs := make(map[string]map[string]string)
-		jobFailed := false
-		for _, step := range job.Steps {
-			name := step.Name
-			if name == "" {
-				if step.Uses != "" {
-					name = "uses: " + step.Uses
-				} else {
-					name = step.Run
-				}
-			}
-			if !r.Quiet {
-				fmt.Fprintf(r.stdout, "--- Step: %s ---\n", name)
+			// Wait for dependencies
+			for _, need := range job.Needs {
+				<-done[need]
 			}
 
-			if step.Uses != "" {
-				outputs, err := r.runAction(step, jobEnv, stepOutputs, resolvedInputs)
-				if err != nil {
-					status[jobName] = "failed"
-					failedJobs = append(failedJobs, jobName)
-					jobFailed = true
-					fmt.Fprintf(r.stderr, "job %q, step %q: %v\n", jobName, name, err)
+			// Check if all dependencies succeeded
+			mu.Lock()
+			skip := false
+			for _, need := range job.Needs {
+				if status[need] != "success" {
+					skip = true
 					break
 				}
+			}
+			if skip {
+				status[jobName] = "skipped"
+				mu.Unlock()
+				if !r.Quiet {
+					var buf bytes.Buffer
+					fmt.Fprintf(&buf, "=== Job: %s (skipped) ===\n", jobName)
+					mu.Lock()
+					buf.WriteTo(r.stdout)
+					mu.Unlock()
+				}
+				return
+			}
+			mu.Unlock()
+
+			// Per-job buffers
+			var stdoutBuf, stderrBuf bytes.Buffer
+
+			if !r.Quiet {
+				fmt.Fprintf(&stdoutBuf, "=== Job: %s ===\n", jobName)
+			}
+
+			// Merge workflow env → job env
+			jobEnv := mergeEnv(wf.Env, job.Env)
+
+			stepOutputs := make(map[string]map[string]string)
+			jobFailed := false
+			for _, step := range job.Steps {
+				name := step.Name
+				if name == "" {
+					if step.Uses != "" {
+						name = "uses: " + step.Uses
+					} else {
+						name = step.Run
+					}
+				}
+				if !r.Quiet {
+					fmt.Fprintf(&stdoutBuf, "--- Step: %s ---\n", name)
+				}
+
+				if step.Uses != "" {
+					outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, &stdoutBuf, &stderrBuf)
+					if err != nil {
+						jobFailed = true
+						fmt.Fprintf(&stderrBuf, "job %q, step %q: %v\n", jobName, name, err)
+						break
+					}
+					if step.Id != "" {
+						stepOutputs[step.Id] = outputs
+					}
+					continue
+				}
+
+				// Create temp file for FLOW_OUTPUT
+				outputFile, err := os.CreateTemp("", "flow-output-*")
+				if err != nil {
+					jobFailed = true
+					fmt.Fprintf(&stderrBuf, "job %q, step %q: creating output file: %v\n", jobName, name, err)
+					break
+				}
+				outputPath := outputFile.Name()
+				outputFile.Close()
+
+				// Expand expressions in the command
+				command := expandExpressions(step.Run, stepOutputs, resolvedInputs)
+
+				// Merge workflow env → job env → step env
+				stepEnv := mergeEnv(jobEnv, step.Env)
+				env := make([]string, 0, len(stepEnv)+1)
+				for k, v := range stepEnv {
+					env = append(env, k+"="+v)
+				}
+				env = append(env, "FLOW_OUTPUT="+outputPath)
+				if err := runShell(command, r.dir, r.stdin, &stdoutBuf, &stderrBuf, env); err != nil {
+					os.Remove(outputPath)
+					jobFailed = true
+					fmt.Fprintf(&stderrBuf, "job %q, step %q: %v\n", jobName, name, err)
+					break
+				}
+
+				// Parse outputs if step has an id
 				if step.Id != "" {
+					outputs, err := parseOutputFile(outputPath)
+					if err != nil {
+						os.Remove(outputPath)
+						jobFailed = true
+						fmt.Fprintf(&stderrBuf, "job %q, step %q: parsing output: %v\n", jobName, name, err)
+						break
+					}
 					stepOutputs[step.Id] = outputs
 				}
-				continue
-			}
-
-			// Create temp file for FLOW_OUTPUT
-			outputFile, err := os.CreateTemp("", "flow-output-*")
-			if err != nil {
-				return fmt.Errorf("creating output file: %w", err)
-			}
-			outputPath := outputFile.Name()
-			outputFile.Close()
-
-			// Expand expressions in the command
-			command := expandExpressions(step.Run, stepOutputs, resolvedInputs)
-
-			// Merge workflow env → job env → step env
-			stepEnv := mergeEnv(jobEnv, step.Env)
-			env := make([]string, 0, len(stepEnv)+1)
-			for k, v := range stepEnv {
-				env = append(env, k+"="+v)
-			}
-			env = append(env, "FLOW_OUTPUT="+outputPath)
-			if err := runShell(command, r.dir, r.stdin, r.stdout, r.stderr, env); err != nil {
 				os.Remove(outputPath)
+			}
+
+			// Flush buffers and update status atomically
+			mu.Lock()
+			stdoutBuf.WriteTo(r.stdout)
+			stderrBuf.WriteTo(r.stderr)
+			if jobFailed {
 				status[jobName] = "failed"
 				failedJobs = append(failedJobs, jobName)
-				jobFailed = true
-				fmt.Fprintf(r.stderr, "job %q, step %q: %v\n", jobName, name, err)
-				break
+			} else {
+				status[jobName] = "success"
 			}
-
-			// Parse outputs if step has an id
-			if step.Id != "" {
-				outputs, err := parseOutputFile(outputPath)
-				if err != nil {
-					os.Remove(outputPath)
-					return fmt.Errorf("parsing output for step %q: %w", step.Id, err)
-				}
-				stepOutputs[step.Id] = outputs
-			}
-			os.Remove(outputPath)
-		}
-		if !jobFailed {
-			status[jobName] = "success"
-		}
+			mu.Unlock()
+		}(jobName)
 	}
+
+	wg.Wait()
 
 	if len(failedJobs) > 0 {
 		return fmt.Errorf("jobs failed: %v", failedJobs)
@@ -155,6 +196,10 @@ func resolveInputs(wf *workflow.Workflow, provided map[string]string) (map[strin
 }
 
 func (r *Runner) runAction(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string) (map[string]string, error) {
+	return r.runActionBuffered(step, jobEnv, stepOutputs, workflowInputs, r.stdout, r.stderr)
+}
+
+func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, stdout, stderr io.Writer) (map[string]string, error) {
 	// Strip leading "./" from uses name
 	usesName := strings.TrimPrefix(step.Uses, "./")
 
@@ -204,7 +249,7 @@ func (r *Runner) runAction(step workflow.Step, jobEnv map[string]string, stepOut
 		}
 		env = append(env, "FLOW_OUTPUT="+outputPath)
 
-		if err := runShell(command, r.dir, r.stdin, r.stdout, r.stderr, env); err != nil {
+		if err := runShell(command, r.dir, r.stdin, stdout, stderr, env); err != nil {
 			os.Remove(outputPath)
 			return nil, err
 		}

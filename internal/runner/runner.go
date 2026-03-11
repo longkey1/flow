@@ -33,6 +33,7 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 	}
 
 	status := make(map[string]string) // "success", "failed", "skipped"
+	jobOutputs := make(map[string]map[string]string)
 	var failedJobs []string
 	var mu sync.Mutex
 
@@ -105,7 +106,10 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 				}
 
 				if step.Uses != "" {
-					outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, &stdoutBuf, &stderrBuf)
+					mu.Lock()
+					actionJobOutputs := copyJobOutputs(jobOutputs)
+					mu.Unlock()
+					outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, actionJobOutputs, &stdoutBuf, &stderrBuf)
 					if err != nil {
 						jobFailed = true
 						fmt.Fprintf(&stderrBuf, "job %q, step %q: %v\n", jobName, name, err)
@@ -128,7 +132,10 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 				outputFile.Close()
 
 				// Expand expressions in the command
-				command := expandExpressions(step.Run, stepOutputs, resolvedInputs)
+				mu.Lock()
+				currentJobOutputs := copyJobOutputs(jobOutputs)
+				mu.Unlock()
+				command := expandExpressions(step.Run, stepOutputs, resolvedInputs, currentJobOutputs)
 
 				// Merge workflow env → job env → step env
 				stepEnv := mergeEnv(jobEnv, step.Env)
@@ -156,6 +163,17 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 					stepOutputs[step.Id] = outputs
 				}
 				os.Remove(outputPath)
+			}
+
+			// Resolve job outputs using step outputs
+			if !jobFailed && len(job.Outputs) > 0 {
+				resolved := make(map[string]string, len(job.Outputs))
+				for k, v := range job.Outputs {
+					resolved[k] = expandExpressions(v, stepOutputs, resolvedInputs, nil)
+				}
+				mu.Lock()
+				jobOutputs[jobName] = resolved
+				mu.Unlock()
 			}
 
 			// Flush buffers and update status atomically
@@ -195,11 +213,11 @@ func resolveInputs(wf *workflow.Workflow, provided map[string]string) (map[strin
 	return resolved, nil
 }
 
-func (r *Runner) runAction(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string) (map[string]string, error) {
-	return r.runActionBuffered(step, jobEnv, stepOutputs, workflowInputs, r.stdout, r.stderr)
+func (r *Runner) runAction(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, jobOutputs map[string]map[string]string) (map[string]string, error) {
+	return r.runActionBuffered(step, jobEnv, stepOutputs, workflowInputs, jobOutputs, r.stdout, r.stderr)
 }
 
-func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, stdout, stderr io.Writer) (map[string]string, error) {
+func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, jobOutputs map[string]map[string]string, stdout, stderr io.Writer) (map[string]string, error) {
 	// Strip leading "./" from uses name
 	usesName := strings.TrimPrefix(step.Uses, "./")
 
@@ -216,7 +234,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 	// Resolve with values (expand workflow expressions first)
 	resolvedWith := make(map[string]string, len(step.With))
 	for k, v := range step.With {
-		resolvedWith[k] = expandExpressions(v, stepOutputs, workflowInputs)
+		resolvedWith[k] = expandExpressions(v, stepOutputs, workflowInputs, jobOutputs)
 	}
 
 	// Resolve action inputs: with values + defaults + required check
@@ -239,7 +257,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		outputFile.Close()
 
 		// Expand expressions: inputs.X → actionInputs, steps.X.outputs.Y → action step outputs
-		command := expandExpressions(actionStep.Run, actionStepOutputs, actionInputs)
+		command := expandExpressions(actionStep.Run, actionStepOutputs, actionInputs, nil)
 
 		// Merge env: calling step env → action step env
 		stepEnv := mergeEnv(callingStepEnv, actionStep.Env)
@@ -288,6 +306,15 @@ func resolveActionInputs(act *action.Action, with map[string]string) (map[string
 		}
 	}
 	return resolved, nil
+}
+
+// copyJobOutputs creates a shallow copy of the jobOutputs map for safe concurrent access.
+func copyJobOutputs(src map[string]map[string]string) map[string]map[string]string {
+	dst := make(map[string]map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // mergeEnv merges two env maps. Values in override take precedence.

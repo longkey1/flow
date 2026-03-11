@@ -26,9 +26,10 @@ type Step struct {
 }
 
 type Job struct {
-	Needs []string          `yaml:"-"`
-	Steps []Step            `yaml:"steps"`
-	Env   map[string]string `yaml:"env"`
+	Needs   []string          `yaml:"-"`
+	Outputs map[string]string `yaml:"-"`
+	Steps   []Step            `yaml:"steps"`
+	Env     map[string]string `yaml:"env"`
 }
 
 type Workflow struct {
@@ -75,7 +76,7 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 					return fmt.Errorf("decoding job %q: %w", jobKey.Value, err)
 				}
 
-				// Parse "needs" field from raw YAML node
+				// Parse "needs" and "outputs" fields from raw YAML node
 				if jobVal.Kind == yaml.MappingNode {
 					for k := 0; k < len(jobVal.Content)-1; k += 2 {
 						if jobVal.Content[k].Value == "needs" {
@@ -92,7 +93,17 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 							default:
 								return fmt.Errorf("job %q: needs must be a string or list of strings", jobKey.Value)
 							}
-							break
+						}
+						if jobVal.Content[k].Value == "outputs" {
+							outputsNode := jobVal.Content[k+1]
+							if outputsNode.Kind != yaml.MappingNode {
+								return fmt.Errorf("job %q: outputs must be a mapping", jobKey.Value)
+							}
+							outputs := make(map[string]string)
+							if err := outputsNode.Decode(&outputs); err != nil {
+								return fmt.Errorf("decoding outputs for job %q: %w", jobKey.Value, err)
+							}
+							job.Outputs = outputs
 						}
 					}
 				}

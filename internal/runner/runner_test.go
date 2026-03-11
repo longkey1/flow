@@ -772,3 +772,88 @@ func TestRunParallelFailedJobSkipsDependents(t *testing.T) {
 		t.Errorf("expected deploy to be skipped, got:\n%s", out)
 	}
 }
+
+func TestRunJobOutputsPropagation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Outputs: map[string]string{
+				"version": "${{ steps.get-ver.outputs.version }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "get-ver", Run: `echo "version=1.2.3" >> $FLOW_OUTPUT`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"build"},
+			Steps: []workflow.Step{
+				{Run: `echo "deploying v${{ needs.build.outputs.version }}"`},
+			},
+		},
+	}, []string{"build", "deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "deploying v1.2.3") {
+		t.Errorf("expected 'deploying v1.2.3' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunJobOutputsMultipleKeys(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Outputs: map[string]string{
+				"name":    "${{ steps.info.outputs.name }}",
+				"version": "${{ steps.info.outputs.version }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "info", Run: `printf "name=myapp\nversion=2.0\n" >> $FLOW_OUTPUT`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"build"},
+			Steps: []workflow.Step{
+				{Run: `echo "${{ needs.build.outputs.name }}-${{ needs.build.outputs.version }}"`},
+			},
+		},
+	}, []string{"build", "deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "myapp-2.0") {
+		t.Errorf("expected 'myapp-2.0' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunJobOutputsUnknownReturnsEmpty(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Steps: []workflow.Step{
+				{Run: `echo build`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"build"},
+			Steps: []workflow.Step{
+				{Run: `echo "[${{ needs.build.outputs.missing }}]"`},
+			},
+		},
+	}, []string{"build", "deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "[]") {
+		t.Errorf("expected '[]' in output, got:\n%s", stdout.String())
+	}
+}

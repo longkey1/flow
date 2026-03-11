@@ -46,7 +46,7 @@ func TestExpandExpressions(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := expandExpressions(tt.input, outputs, nil)
+			got := expandExpressions(tt.input, outputs, nil, nil)
 			if got != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, got)
 			}
@@ -98,7 +98,66 @@ func TestExpandExpressionsInputs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := expandExpressions(tt.input, stepOutputs, inputs)
+			got := expandExpressions(tt.input, stepOutputs, inputs, nil)
+			if got != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestExpandExpressionsNeeds(t *testing.T) {
+	jobOutputs := map[string]map[string]string{
+		"build": {"version": "1.0.0", "artifact": "app.tar.gz"},
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "basic needs substitution",
+			input:    `echo "${{ needs.build.outputs.version }}"`,
+			expected: `echo "1.0.0"`,
+		},
+		{
+			name:     "no spaces in braces",
+			input:    `echo "${{needs.build.outputs.artifact}}"`,
+			expected: `echo "app.tar.gz"`,
+		},
+		{
+			name:     "multiple needs substitutions",
+			input:    `echo "${{ needs.build.outputs.version }} ${{ needs.build.outputs.artifact }}"`,
+			expected: `echo "1.0.0 app.tar.gz"`,
+		},
+		{
+			name:     "unknown job returns empty",
+			input:    `echo "${{ needs.unknown.outputs.key }}"`,
+			expected: `echo ""`,
+		},
+		{
+			name:     "unknown key returns empty",
+			input:    `echo "${{ needs.build.outputs.unknown }}"`,
+			expected: `echo ""`,
+		},
+		{
+			name:     "mixed steps inputs and needs",
+			input:    `echo "${{ steps.s1.outputs.key }} ${{ inputs.name }} ${{ needs.build.outputs.version }}"`,
+			expected: `echo "val World 1.0.0"`,
+		},
+	}
+
+	stepOutputs := map[string]map[string]string{
+		"s1": {"key": "val"},
+	}
+	inputs := map[string]string{
+		"name": "World",
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandExpressions(tt.input, stepOutputs, inputs, jobOutputs)
 			if got != tt.expected {
 				t.Errorf("expected %q, got %q", tt.expected, got)
 			}

@@ -537,3 +537,40 @@ jobs:
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
+
+func TestParseJobOutputs(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    outputs:
+      version: ${{ steps.get-ver.outputs.version }}
+      artifact: ${{ steps.get-ver.outputs.artifact }}
+    steps:
+      - id: get-ver
+        run: echo "version=1.0" >> $FLOW_OUTPUT
+`)
+	outputs := wf.Jobs["build"].Outputs
+	if len(outputs) != 2 {
+		t.Fatalf("expected 2 outputs, got %d", len(outputs))
+	}
+	if outputs["version"] != "${{ steps.get-ver.outputs.version }}" {
+		t.Errorf("expected version expression, got %q", outputs["version"])
+	}
+	if outputs["artifact"] != "${{ steps.get-ver.outputs.artifact }}" {
+		t.Errorf("expected artifact expression, got %q", outputs["artifact"])
+	}
+}
+
+func TestParseJobOutputsEmpty(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if len(wf.Jobs["build"].Outputs) != 0 {
+		t.Errorf("expected no outputs, got %d", len(wf.Jobs["build"].Outputs))
+	}
+}

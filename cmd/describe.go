@@ -94,7 +94,19 @@ var describeCmd = &cobra.Command{
 					fmt.Fprintf(out, " (%s)", strings.Join(parts, ", "))
 				}
 				fmt.Fprintln(out)
+				if job.Strategy != nil {
+					fmt.Fprintln(out, "    strategy:")
+					fmt.Fprintln(out, "      matrix:")
+					for k, param := range job.Strategy.Matrix {
+						if param.Expression != "" {
+							fmt.Fprintf(out, "        %s: %s\n", k, param.Expression)
+						} else {
+							fmt.Fprintf(out, "        %s: [%s]\n", k, join(param.Values))
+						}
+					}
+				}
 				if job.Uses != "" && len(job.With) > 0 {
+					fmt.Fprintln(out, "    with:")
 					for k, v := range job.With {
 						fmt.Fprintf(out, "      %s: %s\n", k, v)
 					}

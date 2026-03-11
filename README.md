@@ -44,11 +44,21 @@ name: workflow-name        # Required
 quiet: true                # Optional: suppress job/step log headers
 env:                        # Optional: workflow-level environment variables
   GLOBAL_VAR: value
+outputs:                    # Optional: workflow-level outputs (for reusable workflows)
+  result: ${{ jobs.build.outputs.status }}
 jobs:
   job-name:
     needs: [dependency]    # Optional: jobs that must complete first
+    outputs:                # Optional: job-level outputs
+      version: ${{ steps.ver.outputs.version }}
+    strategy:               # Optional: matrix strategy
+      matrix:
+        key: ["val1", "val2"]
     env:                    # Optional: job-level environment variables
       JOB_VAR: value
+    uses: ./other-workflow  # Optional: reference a reusable workflow (mutually exclusive with steps)
+    with:                    # Optional: inputs for uses or matrix expressions
+      input_key: value
     steps:
       - id: step-id        # Optional: identifier for referencing outputs
         name: Display Name  # Optional: shown in output
@@ -127,6 +137,143 @@ needs: [build, lint]  # multiple dependencies
 If a job fails, all dependent jobs are skipped. Independent jobs continue to run.
 
 Each job's output (stdout/stderr) is buffered and flushed as a unit when the job completes, preventing interleaved output from parallel jobs.
+
+#### Job Outputs
+
+Jobs can declare outputs that are derived from step outputs. These outputs can be referenced by downstream jobs using `${{ needs.<job>.outputs.<key> }}`:
+
+```yaml
+name: pipeline
+jobs:
+  build:
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - id: ver
+        run: echo "version=1.2.3" >> $FLOW_OUTPUT
+
+  deploy:
+    needs: build
+    steps:
+      - run: echo "Deploying v${{ needs.build.outputs.version }}"
+```
+
+#### Reusable Workflows
+
+Jobs can reference other workflows with `uses`, similar to GitHub Actions reusable workflows. Pass inputs with `with`:
+
+```yaml
+name: pipeline
+jobs:
+  build:
+    steps:
+      - run: make build
+
+  deploy:
+    needs: build
+    uses: ./deploy
+    with:
+      version: "${{ needs.build.outputs.version }}"
+```
+
+The referenced workflow is loaded from `.flow/workflows/<name>.yaml`. A job cannot have both `uses` and `steps`.
+
+Reusable workflows can declare `outputs` that propagate back to the calling workflow:
+
+```yaml
+# .flow/workflows/deploy.yaml
+name: deploy
+inputs:
+  version:
+    required: true
+outputs:
+  result: ${{ jobs.run.outputs.status }}
+jobs:
+  run:
+    outputs:
+      status: ${{ steps.do.outputs.status }}
+    steps:
+      - id: do
+        run: echo "status=deployed-${{ inputs.version }}" >> $FLOW_OUTPUT
+```
+
+#### Matrix Strategy
+
+Jobs can use `strategy.matrix` to run multiple times with different parameter combinations. Each combination runs in parallel.
+
+**Static values:**
+
+```yaml
+name: test
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: ["16", "18", "20"]
+    steps:
+      - run: echo "Testing on Node ${{ matrix.node }}"
+```
+
+This runs the job 3 times in parallel with `matrix.node` set to `"16"`, `"18"`, and `"20"`.
+
+**Multiple keys (cartesian product):**
+
+```yaml
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: ["linux", "darwin"]
+        arch: ["amd64", "arm64"]
+    steps:
+      - run: echo "Build for ${{ matrix.os }}/${{ matrix.arch }}"
+```
+
+This produces 4 combinations: `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`.
+
+**Dynamic values with `fromJson`:**
+
+Use `fromJson()` to expand a JSON array produced by a previous job's output:
+
+```yaml
+jobs:
+  setup:
+    outputs:
+      targets: ${{ steps.list.outputs.targets }}
+    steps:
+      - id: list
+        run: echo 'targets=["api","web","worker"]' >> $FLOW_OUTPUT
+
+  deploy:
+    needs: setup
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.setup.outputs.targets) }}
+    uses: ./deploy
+    with:
+      target: ${{ matrix.target }}
+```
+
+**Matrix with reusable workflows:**
+
+Matrix works with both `steps` and `uses`:
+
+```yaml
+jobs:
+  deploy:
+    strategy:
+      matrix:
+        target: ["api", "web"]
+    uses: ./deploy
+    with:
+      target: ${{ matrix.target }}
+```
+
+Notes:
+- Matrix combinations run in parallel
+- Matrix job outputs are **not** propagated to downstream jobs
+- Output displays the matrix label: `=== Job: deploy [target=api] ===`
+- If any combination fails, the job is marked as failed
 
 ### Steps
 
@@ -239,6 +386,25 @@ jobs:
 - `with` is only valid when `uses` is specified
 - Action steps can reference each other's outputs with `${{ steps.<id>.outputs.<key> }}`
 - Environment variables are merged: workflow env -> job env -> calling step env -> action step env
+
+### Workflow Outputs
+
+Workflows can declare outputs that map to job outputs. This is primarily useful for reusable workflows, where the calling workflow needs to access results:
+
+```yaml
+name: build
+outputs:
+  version: ${{ jobs.compile.outputs.version }}
+jobs:
+  compile:
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - id: ver
+        run: echo "version=1.0.0" >> $FLOW_OUTPUT
+```
+
+Workflow output expressions use `${{ jobs.<job>.outputs.<key> }}` syntax.
 
 ### Environment Variables
 

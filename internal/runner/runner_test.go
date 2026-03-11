@@ -1051,3 +1051,176 @@ func TestRunSubWorkflowNotFound(t *testing.T) {
 		t.Errorf("expected 'not found' in stderr, got: %v", stderr.String())
 	}
 }
+
+func TestRunMatrixStepsBasic(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"test": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"node": {Values: []string{"16", "18"}},
+				},
+			},
+			Steps: []workflow.Step{
+				{Run: `echo "node=${{ matrix.node }}"`},
+			},
+		},
+	}, []string{"test"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "node=16") {
+		t.Errorf("expected 'node=16' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "node=18") {
+		t.Errorf("expected 'node=18' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[node=16]") {
+		t.Errorf("expected matrix label '[node=16]' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "[node=18]") {
+		t.Errorf("expected matrix label '[node=18]' in output, got:\n%s", out)
+	}
+}
+
+func TestRunMatrixWithUses(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "deploy", `
+name: deploy
+inputs:
+  target:
+    required: true
+jobs:
+  run:
+    steps:
+      - run: echo "deploying ${{ inputs.target }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"deploy": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"target": {Values: []string{"api", "web"}},
+				},
+			},
+			Uses: "./deploy",
+			With: map[string]string{"target": "${{ matrix.target }}"},
+		},
+	}, []string{"deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "deploying api") {
+		t.Errorf("expected 'deploying api' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "deploying web") {
+		t.Errorf("expected 'deploying web' in output, got:\n%s", out)
+	}
+}
+
+func TestRunMatrixFromJson(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"setup": {
+			Outputs: map[string]string{
+				"targets": "${{ steps.list.outputs.targets }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "list", Run: `echo 'targets=["api","web","worker"]' >> $FLOW_OUTPUT`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"setup"},
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"target": {Expression: "${{ fromJson(needs.setup.outputs.targets) }}"},
+				},
+			},
+			Steps: []workflow.Step{
+				{Run: `echo "deploy=${{ matrix.target }}"`},
+			},
+		},
+	}, []string{"setup", "deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "deploy=api") {
+		t.Errorf("expected 'deploy=api' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "deploy=web") {
+		t.Errorf("expected 'deploy=web' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "deploy=worker") {
+		t.Errorf("expected 'deploy=worker' in output, got:\n%s", out)
+	}
+}
+
+func TestRunMatrixParallel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.Quiet = true
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"test": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"item": {Values: []string{"a", "b", "c"}},
+				},
+			},
+			Steps: []workflow.Step{
+				{Run: "sleep 0.5 && echo done"},
+			},
+		},
+	}, []string{"test"})
+
+	start := time.Now()
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// 3 items at 0.5s each: sequential=1.5s, parallel≈0.5s
+	if elapsed > 1200*time.Millisecond {
+		t.Errorf("expected parallel matrix execution (<1.2s), took %v", elapsed)
+	}
+}
+
+func TestRunMatrixOneFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"test": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"item": {Values: []string{"ok", "fail"}},
+				},
+			},
+			Steps: []workflow.Step{
+				{Run: `if [ "${{ matrix.item }}" = "fail" ]; then exit 1; fi; echo "${{ matrix.item }}"`},
+			},
+		},
+	}, []string{"test"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when matrix combination fails")
+	}
+	if !strings.Contains(err.Error(), "jobs failed") {
+		t.Errorf("expected 'jobs failed' error, got: %v", err)
+	}
+}

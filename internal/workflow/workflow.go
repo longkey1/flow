@@ -25,13 +25,23 @@ type Step struct {
 	Env  map[string]string `yaml:"env"`
 }
 
+type MatrixParam struct {
+	Values     []string // static values from YAML list
+	Expression string   // dynamic expression (e.g. fromJson(...))
+}
+
+type Strategy struct {
+	Matrix map[string]MatrixParam
+}
+
 type Job struct {
-	Needs   []string          `yaml:"-"`
-	Outputs map[string]string `yaml:"-"`
-	Uses    string            `yaml:"-"`
-	With    map[string]string `yaml:"-"`
-	Steps   []Step            `yaml:"steps"`
-	Env     map[string]string `yaml:"env"`
+	Needs    []string          `yaml:"-"`
+	Outputs  map[string]string `yaml:"-"`
+	Uses     string            `yaml:"-"`
+	With     map[string]string `yaml:"-"`
+	Strategy *Strategy         `yaml:"-"`
+	Steps    []Step            `yaml:"steps"`
+	Env      map[string]string `yaml:"env"`
 }
 
 type Workflow struct {
@@ -127,6 +137,38 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 							}
 							job.With = withMap
 						}
+						if jobVal.Content[k].Value == "strategy" {
+							strategyNode := jobVal.Content[k+1]
+							if strategyNode.Kind != yaml.MappingNode {
+								return fmt.Errorf("job %q: strategy must be a mapping", jobKey.Value)
+							}
+							for s := 0; s < len(strategyNode.Content)-1; s += 2 {
+								if strategyNode.Content[s].Value == "matrix" {
+									matrixNode := strategyNode.Content[s+1]
+									if matrixNode.Kind != yaml.MappingNode {
+										return fmt.Errorf("job %q: strategy.matrix must be a mapping", jobKey.Value)
+									}
+									matrix := make(map[string]MatrixParam)
+									for m := 0; m < len(matrixNode.Content)-1; m += 2 {
+										paramKey := matrixNode.Content[m].Value
+										paramVal := matrixNode.Content[m+1]
+										switch paramVal.Kind {
+										case yaml.SequenceNode:
+											var values []string
+											if err := paramVal.Decode(&values); err != nil {
+												return fmt.Errorf("decoding matrix param %q for job %q: %w", paramKey, jobKey.Value, err)
+											}
+											matrix[paramKey] = MatrixParam{Values: values}
+										case yaml.ScalarNode:
+											matrix[paramKey] = MatrixParam{Expression: paramVal.Value}
+										default:
+											return fmt.Errorf("job %q: matrix param %q must be a list or expression string", jobKey.Value, paramKey)
+										}
+									}
+									job.Strategy = &Strategy{Matrix: matrix}
+								}
+							}
+						}
 					}
 				}
 
@@ -152,10 +194,20 @@ func (w *Workflow) Validate() error {
 		return fmt.Errorf("workflow must have at least one job")
 	}
 	for jobName, job := range w.Jobs {
+		if job.Strategy != nil {
+			if len(job.Strategy.Matrix) == 0 {
+				return fmt.Errorf("job %q: strategy.matrix must have at least one key", jobName)
+			}
+			for key, param := range job.Strategy.Matrix {
+				if param.Expression == "" && len(param.Values) == 0 {
+					return fmt.Errorf("job %q: matrix param %q must have values or an expression", jobName, key)
+				}
+			}
+		}
 		if job.Uses != "" && len(job.Steps) > 0 {
 			return fmt.Errorf("job %q cannot have both uses and steps", jobName)
 		}
-		if job.Uses == "" && len(job.With) > 0 {
+		if job.Uses == "" && len(job.With) > 0 && job.Strategy == nil {
 			return fmt.Errorf("job %q has with but no uses", jobName)
 		}
 		if job.Uses != "" {

@@ -667,3 +667,99 @@ jobs:
 		t.Errorf("expected version expression, got %q", wf.Outputs["version"])
 	}
 }
+
+func TestParseMatrixStaticValues(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: ["16", "18", "20"]
+    steps:
+      - run: echo "Node ${{ matrix.node }}"
+`)
+	job := wf.Jobs["test"]
+	if job.Strategy == nil {
+		t.Fatal("expected strategy to be set")
+	}
+	param, ok := job.Strategy.Matrix["node"]
+	if !ok {
+		t.Fatal("expected matrix param 'node'")
+	}
+	if len(param.Values) != 3 || param.Values[0] != "16" || param.Values[1] != "18" || param.Values[2] != "20" {
+		t.Errorf("expected values [16, 18, 20], got %v", param.Values)
+	}
+	if param.Expression != "" {
+		t.Errorf("expected no expression, got %q", param.Expression)
+	}
+}
+
+func TestParseMatrixFromJsonExpression(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  setup:
+    steps:
+      - run: echo setup
+  deploy:
+    needs: setup
+    strategy:
+      matrix:
+        target: ${{ fromJson(needs.setup.outputs.targets) }}
+    steps:
+      - run: echo "${{ matrix.target }}"
+`)
+	job := wf.Jobs["deploy"]
+	if job.Strategy == nil {
+		t.Fatal("expected strategy to be set")
+	}
+	param := job.Strategy.Matrix["target"]
+	if param.Expression != "${{ fromJson(needs.setup.outputs.targets) }}" {
+		t.Errorf("expected fromJson expression, got %q", param.Expression)
+	}
+	if len(param.Values) != 0 {
+		t.Errorf("expected no static values, got %v", param.Values)
+	}
+}
+
+func TestValidateMatrixEmpty(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: ["16"]
+    steps:
+      - run: echo test
+`)
+	// Valid: at least one key with values
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestParseMatrixWithUses(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  deploy:
+    strategy:
+      matrix:
+        target: ["api", "web"]
+    uses: ./deploy
+    with:
+      target: ${{ matrix.target }}
+`)
+	job := wf.Jobs["deploy"]
+	if job.Strategy == nil {
+		t.Fatal("expected strategy to be set")
+	}
+	if job.Uses != "./deploy" {
+		t.Errorf("expected uses './deploy', got %q", job.Uses)
+	}
+	if job.With["target"] != "${{ matrix.target }}" {
+		t.Errorf("expected with target expression, got %q", job.With["target"])
+	}
+}

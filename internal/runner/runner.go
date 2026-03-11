@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 
@@ -92,6 +93,93 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int)
 			}
 			mu.Unlock()
 
+			// Matrix strategy
+			if job.Strategy != nil {
+				mu.Lock()
+				currentJobOutputs := copyJobOutputs(jobOutputs)
+				mu.Unlock()
+
+				// Resolve all matrix params
+				resolvedParams := make(map[string][]string)
+				for key, param := range job.Strategy.Matrix {
+					values, err := resolveMatrixParam(param, resolvedInputs, currentJobOutputs)
+					if err != nil {
+						mu.Lock()
+						fmt.Fprintf(r.stderr, "job %q: resolving matrix param %q: %v\n", jobName, key, err)
+						status[jobName] = "failed"
+						failedJobs = append(failedJobs, jobName)
+						mu.Unlock()
+						return
+					}
+					resolvedParams[key] = values
+				}
+
+				combos := cartesianProduct(resolvedParams)
+
+				var matrixWg sync.WaitGroup
+				var matrixFailed int32
+				var matrixMu sync.Mutex
+
+				for _, combo := range combos {
+					matrixWg.Add(1)
+					go func(matrixValues map[string]string) {
+						defer matrixWg.Done()
+
+						matrixLabel := formatMatrixLabel(matrixValues)
+
+						if job.Uses != "" {
+							if !r.Quiet {
+								var buf bytes.Buffer
+								fmt.Fprintf(&buf, "=== Job: %s [%s] (uses: %s) ===\n", jobName, matrixLabel, job.Uses)
+								mu.Lock()
+								buf.WriteTo(r.stdout)
+								mu.Unlock()
+							}
+
+							_, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, depth)
+							if err != nil {
+								mu.Lock()
+								fmt.Fprintf(r.stderr, "job %q [%s]: %v\n", jobName, matrixLabel, err)
+								mu.Unlock()
+								matrixMu.Lock()
+								matrixFailed++
+								matrixMu.Unlock()
+							}
+						} else {
+							var stdoutBuf, stderrBuf bytes.Buffer
+							if !r.Quiet {
+								fmt.Fprintf(&stdoutBuf, "=== Job: %s [%s] ===\n", jobName, matrixLabel)
+							}
+
+							_, failed := r.runJobSteps(job, jobName, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf)
+
+							mu.Lock()
+							stdoutBuf.WriteTo(r.stdout)
+							stderrBuf.WriteTo(r.stderr)
+							mu.Unlock()
+
+							if failed {
+								matrixMu.Lock()
+								matrixFailed++
+								matrixMu.Unlock()
+							}
+						}
+					}(combo)
+				}
+
+				matrixWg.Wait()
+
+				mu.Lock()
+				if matrixFailed > 0 {
+					status[jobName] = "failed"
+					failedJobs = append(failedJobs, jobName)
+				} else {
+					status[jobName] = "success"
+				}
+				mu.Unlock()
+				return
+			}
+
 			// Handle job-level uses (reusable workflows)
 			if job.Uses != "" {
 				if !r.Quiet {
@@ -106,7 +194,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int)
 				currentJobOutputs := copyJobOutputs(jobOutputs)
 				mu.Unlock()
 
-				subOutputs, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, depth)
+				subOutputs, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, nil, depth)
 				mu.Lock()
 				if err != nil {
 					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
@@ -129,89 +217,17 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int)
 				fmt.Fprintf(&stdoutBuf, "=== Job: %s ===\n", jobName)
 			}
 
-			// Merge workflow env → job env
-			jobEnv := mergeEnv(wf.Env, job.Env)
+			mu.Lock()
+			currentJobOutputs := copyJobOutputs(jobOutputs)
+			mu.Unlock()
 
-			stepOutputs := make(map[string]map[string]string)
-			jobFailed := false
-			for _, step := range job.Steps {
-				name := step.Name
-				if name == "" {
-					if step.Uses != "" {
-						name = "uses: " + step.Uses
-					} else {
-						name = step.Run
-					}
-				}
-				if !r.Quiet {
-					fmt.Fprintf(&stdoutBuf, "--- Step: %s ---\n", name)
-				}
-
-				if step.Uses != "" {
-					mu.Lock()
-					actionJobOutputs := copyJobOutputs(jobOutputs)
-					mu.Unlock()
-					outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, actionJobOutputs, &stdoutBuf, &stderrBuf)
-					if err != nil {
-						jobFailed = true
-						fmt.Fprintf(&stderrBuf, "job %q, step %q: %v\n", jobName, name, err)
-						break
-					}
-					if step.Id != "" {
-						stepOutputs[step.Id] = outputs
-					}
-					continue
-				}
-
-				// Create temp file for FLOW_OUTPUT
-				outputFile, err := os.CreateTemp("", "flow-output-*")
-				if err != nil {
-					jobFailed = true
-					fmt.Fprintf(&stderrBuf, "job %q, step %q: creating output file: %v\n", jobName, name, err)
-					break
-				}
-				outputPath := outputFile.Name()
-				outputFile.Close()
-
-				// Expand expressions in the command
-				mu.Lock()
-				currentJobOutputs := copyJobOutputs(jobOutputs)
-				mu.Unlock()
-				command := expandExpressions(step.Run, stepOutputs, resolvedInputs, currentJobOutputs)
-
-				// Merge workflow env → job env → step env
-				stepEnv := mergeEnv(jobEnv, step.Env)
-				env := make([]string, 0, len(stepEnv)+1)
-				for k, v := range stepEnv {
-					env = append(env, k+"="+v)
-				}
-				env = append(env, "FLOW_OUTPUT="+outputPath)
-				if err := runShell(command, r.dir, r.stdin, &stdoutBuf, &stderrBuf, env); err != nil {
-					os.Remove(outputPath)
-					jobFailed = true
-					fmt.Fprintf(&stderrBuf, "job %q, step %q: %v\n", jobName, name, err)
-					break
-				}
-
-				// Parse outputs if step has an id
-				if step.Id != "" {
-					outputs, err := parseOutputFile(outputPath)
-					if err != nil {
-						os.Remove(outputPath)
-						jobFailed = true
-						fmt.Fprintf(&stderrBuf, "job %q, step %q: parsing output: %v\n", jobName, name, err)
-						break
-					}
-					stepOutputs[step.Id] = outputs
-				}
-				os.Remove(outputPath)
-			}
+			stepOutputs, jobFailed := r.runJobSteps(job, jobName, wf.Env, resolvedInputs, currentJobOutputs, nil, &stdoutBuf, &stderrBuf)
 
 			// Resolve job outputs using step outputs
 			if !jobFailed && len(job.Outputs) > 0 {
 				resolved := make(map[string]string, len(job.Outputs))
 				for k, v := range job.Outputs {
-					resolved[k] = expandExpressions(v, stepOutputs, resolvedInputs, nil)
+					resolved[k] = expandExpressions(v, stepOutputs, resolvedInputs, nil, nil)
 				}
 				mu.Lock()
 				jobOutputs[jobName] = resolved
@@ -250,7 +266,87 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int)
 	return nil, nil
 }
 
-func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, callerInputs map[string]string, callerJobOutputs map[string]map[string]string, depth int) (map[string]string, error) {
+// runJobSteps executes all steps in a job and returns step outputs and whether the job failed.
+func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]string,
+	resolvedInputs map[string]string, jobOutputs map[string]map[string]string,
+	matrixValues map[string]string, stdout, stderr io.Writer) (map[string]map[string]string, bool) {
+
+	// Merge workflow env → job env
+	jobEnv := mergeEnv(wfEnv, job.Env)
+
+	stepOutputs := make(map[string]map[string]string)
+	jobFailed := false
+	for _, step := range job.Steps {
+		name := step.Name
+		if name == "" {
+			if step.Uses != "" {
+				name = "uses: " + step.Uses
+			} else {
+				name = step.Run
+			}
+		}
+		if !r.Quiet {
+			fmt.Fprintf(stdout, "--- Step: %s ---\n", name)
+		}
+
+		if step.Uses != "" {
+			outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, jobOutputs, matrixValues, stdout, stderr)
+			if err != nil {
+				jobFailed = true
+				fmt.Fprintf(stderr, "job %q, step %q: %v\n", jobName, name, err)
+				break
+			}
+			if step.Id != "" {
+				stepOutputs[step.Id] = outputs
+			}
+			continue
+		}
+
+		// Create temp file for FLOW_OUTPUT
+		outputFile, err := os.CreateTemp("", "flow-output-*")
+		if err != nil {
+			jobFailed = true
+			fmt.Fprintf(stderr, "job %q, step %q: creating output file: %v\n", jobName, name, err)
+			break
+		}
+		outputPath := outputFile.Name()
+		outputFile.Close()
+
+		// Expand expressions in the command
+		command := expandExpressions(step.Run, stepOutputs, resolvedInputs, jobOutputs, matrixValues)
+
+		// Merge workflow env → job env → step env
+		stepEnv := mergeEnv(jobEnv, step.Env)
+		env := make([]string, 0, len(stepEnv)+1)
+		for k, v := range stepEnv {
+			env = append(env, k+"="+v)
+		}
+		env = append(env, "FLOW_OUTPUT="+outputPath)
+		if err := runShell(command, r.dir, r.stdin, stdout, stderr, env); err != nil {
+			os.Remove(outputPath)
+			jobFailed = true
+			fmt.Fprintf(stderr, "job %q, step %q: %v\n", jobName, name, err)
+			break
+		}
+
+		// Parse outputs if step has an id
+		if step.Id != "" {
+			outputs, err := parseOutputFile(outputPath)
+			if err != nil {
+				os.Remove(outputPath)
+				jobFailed = true
+				fmt.Fprintf(stderr, "job %q, step %q: parsing output: %v\n", jobName, name, err)
+				break
+			}
+			stepOutputs[step.Id] = outputs
+		}
+		os.Remove(outputPath)
+	}
+
+	return stepOutputs, jobFailed
+}
+
+func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, callerInputs map[string]string, callerJobOutputs map[string]map[string]string, matrixValues map[string]string, depth int) (map[string]string, error) {
 	usesName := strings.TrimPrefix(job.Uses, "./")
 
 	subPath, err := workflow.Find(r.WorkflowsDir, usesName)
@@ -265,7 +361,7 @@ func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, c
 	// Resolve with values using caller context
 	resolvedWith := make(map[string]string, len(job.With))
 	for k, v := range job.With {
-		resolvedWith[k] = expandExpressions(v, nil, callerInputs, callerJobOutputs)
+		resolvedWith[k] = expandExpressions(v, nil, callerInputs, callerJobOutputs, matrixValues)
 	}
 
 	// Merge caller env into sub-workflow env (sub-workflow env takes precedence)
@@ -301,10 +397,10 @@ func resolveInputs(wf *workflow.Workflow, provided map[string]string) (map[strin
 }
 
 func (r *Runner) runAction(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, jobOutputs map[string]map[string]string) (map[string]string, error) {
-	return r.runActionBuffered(step, jobEnv, stepOutputs, workflowInputs, jobOutputs, r.stdout, r.stderr)
+	return r.runActionBuffered(step, jobEnv, stepOutputs, workflowInputs, jobOutputs, nil, r.stdout, r.stderr)
 }
 
-func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, jobOutputs map[string]map[string]string, stdout, stderr io.Writer) (map[string]string, error) {
+func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string, stepOutputs map[string]map[string]string, workflowInputs map[string]string, jobOutputs map[string]map[string]string, matrixValues map[string]string, stdout, stderr io.Writer) (map[string]string, error) {
 	// Strip leading "./" from uses name
 	usesName := strings.TrimPrefix(step.Uses, "./")
 
@@ -321,7 +417,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 	// Resolve with values (expand workflow expressions first)
 	resolvedWith := make(map[string]string, len(step.With))
 	for k, v := range step.With {
-		resolvedWith[k] = expandExpressions(v, stepOutputs, workflowInputs, jobOutputs)
+		resolvedWith[k] = expandExpressions(v, stepOutputs, workflowInputs, jobOutputs, matrixValues)
 	}
 
 	// Resolve action inputs: with values + defaults + required check
@@ -344,7 +440,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		outputFile.Close()
 
 		// Expand expressions: inputs.X → actionInputs, steps.X.outputs.Y → action step outputs
-		command := expandExpressions(actionStep.Run, actionStepOutputs, actionInputs, nil)
+		command := expandExpressions(actionStep.Run, actionStepOutputs, actionInputs, nil, nil)
 
 		// Merge env: calling step env → action step env
 		stepEnv := mergeEnv(callingStepEnv, actionStep.Env)
@@ -417,4 +513,19 @@ func mergeEnv(base, override map[string]string) map[string]string {
 		merged[k] = v
 	}
 	return merged
+}
+
+// formatMatrixLabel formats matrix values as "key=val, key2=val2" for display.
+func formatMatrixLabel(matrixValues map[string]string) string {
+	keys := make([]string, 0, len(matrixValues))
+	for k := range matrixValues {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	parts := make([]string, 0, len(keys))
+	for _, k := range keys {
+		parts = append(parts, k+"="+matrixValues[k])
+	}
+	return strings.Join(parts, ", ")
 }

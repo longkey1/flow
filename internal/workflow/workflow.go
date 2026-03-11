@@ -28,6 +28,8 @@ type Step struct {
 type Job struct {
 	Needs   []string          `yaml:"-"`
 	Outputs map[string]string `yaml:"-"`
+	Uses    string            `yaml:"-"`
+	With    map[string]string `yaml:"-"`
 	Steps   []Step            `yaml:"steps"`
 	Env     map[string]string `yaml:"env"`
 }
@@ -37,6 +39,7 @@ type Workflow struct {
 	Quiet    bool              `yaml:"quiet"`
 	Env      map[string]string `yaml:"-"`
 	Inputs   map[string]Input  `yaml:"-"`
+	Outputs  map[string]string `yaml:"-"`
 	Jobs     map[string]Job    `yaml:"-"`
 	JobOrder []string          `yaml:"-"`
 }
@@ -61,6 +64,11 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 			w.Inputs = make(map[string]Input)
 			if err := val.Decode(&w.Inputs); err != nil {
 				return fmt.Errorf("decoding workflow inputs: %w", err)
+			}
+		case "outputs":
+			w.Outputs = make(map[string]string)
+			if err := val.Decode(&w.Outputs); err != nil {
+				return fmt.Errorf("decoding workflow outputs: %w", err)
 			}
 		case "jobs":
 			w.Jobs = make(map[string]Job)
@@ -105,6 +113,20 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 							}
 							job.Outputs = outputs
 						}
+						if jobVal.Content[k].Value == "uses" {
+							job.Uses = jobVal.Content[k+1].Value
+						}
+						if jobVal.Content[k].Value == "with" {
+							withNode := jobVal.Content[k+1]
+							if withNode.Kind != yaml.MappingNode {
+								return fmt.Errorf("job %q: with must be a mapping", jobKey.Value)
+							}
+							withMap := make(map[string]string)
+							if err := withNode.Decode(&withMap); err != nil {
+								return fmt.Errorf("decoding with for job %q: %w", jobKey.Value, err)
+							}
+							job.With = withMap
+						}
 					}
 				}
 
@@ -130,28 +152,38 @@ func (w *Workflow) Validate() error {
 		return fmt.Errorf("workflow must have at least one job")
 	}
 	for jobName, job := range w.Jobs {
-		if len(job.Steps) == 0 {
-			return fmt.Errorf("job %q must have at least one step", jobName)
+		if job.Uses != "" && len(job.Steps) > 0 {
+			return fmt.Errorf("job %q cannot have both uses and steps", jobName)
 		}
-		seenIDs := make(map[string]bool)
-		for i, step := range job.Steps {
-			if step.Run == "" && step.Uses == "" {
-				return fmt.Errorf("step %d in job %q must have a run command or uses reference", i+1, jobName)
+		if job.Uses == "" && len(job.With) > 0 {
+			return fmt.Errorf("job %q has with but no uses", jobName)
+		}
+		if job.Uses != "" {
+			// uses job: skip step validation
+		} else {
+			if len(job.Steps) == 0 {
+				return fmt.Errorf("job %q must have at least one step", jobName)
 			}
-			if step.Run != "" && step.Uses != "" {
-				return fmt.Errorf("step %d in job %q cannot have both run and uses", i+1, jobName)
-			}
-			if step.Uses == "" && len(step.With) > 0 {
-				return fmt.Errorf("step %d in job %q has with but no uses", i+1, jobName)
-			}
-			if step.Id != "" {
-				if !validIDPattern.MatchString(step.Id) {
-					return fmt.Errorf("step %d in job %q has invalid id %q: must contain only alphanumeric characters and hyphens", i+1, jobName, step.Id)
+			seenIDs := make(map[string]bool)
+			for i, step := range job.Steps {
+				if step.Run == "" && step.Uses == "" {
+					return fmt.Errorf("step %d in job %q must have a run command or uses reference", i+1, jobName)
 				}
-				if seenIDs[step.Id] {
-					return fmt.Errorf("step %d in job %q has duplicate id %q", i+1, jobName, step.Id)
+				if step.Run != "" && step.Uses != "" {
+					return fmt.Errorf("step %d in job %q cannot have both run and uses", i+1, jobName)
 				}
-				seenIDs[step.Id] = true
+				if step.Uses == "" && len(step.With) > 0 {
+					return fmt.Errorf("step %d in job %q has with but no uses", i+1, jobName)
+				}
+				if step.Id != "" {
+					if !validIDPattern.MatchString(step.Id) {
+						return fmt.Errorf("step %d in job %q has invalid id %q: must contain only alphanumeric characters and hyphens", i+1, jobName, step.Id)
+					}
+					if seenIDs[step.Id] {
+						return fmt.Errorf("step %d in job %q has duplicate id %q", i+1, jobName, step.Id)
+					}
+					seenIDs[step.Id] = true
+				}
 			}
 		}
 		for _, need := range job.Needs {

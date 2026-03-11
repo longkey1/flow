@@ -72,6 +72,7 @@ var runCmd = &cobra.Command{
 		r := runner.New(os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), baseDir)
 		r.Quiet = wf.Quiet && !debug
 		r.ActionsDir = actionsDir(baseDir)
+		r.WorkflowsDir = workflowsDir(baseDir)
 		return r.Run(wf, inputs)
 	},
 }

@@ -857,3 +857,197 @@ func TestRunJobOutputsUnknownReturnsEmpty(t *testing.T) {
 		t.Errorf("expected '[]' in output, got:\n%s", stdout.String())
 	}
 }
+
+func writeWorkflow(t *testing.T, dir, name, content string) {
+	t.Helper()
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content), 0o644)
+}
+
+func TestRunSubWorkflowBasic(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "sub", `
+name: sub
+jobs:
+  run:
+    steps:
+      - run: echo "hello from sub"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"call": {Uses: "./sub"},
+	}, []string{"call"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello from sub") {
+		t.Errorf("expected 'hello from sub' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunSubWorkflowWithInputs(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "greet", `
+name: greet
+inputs:
+  name:
+    required: true
+jobs:
+  run:
+    steps:
+      - run: echo "hello ${{ inputs.name }}"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"call": {Uses: "./greet", With: map[string]string{"name": "World"}},
+	}, []string{"call"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "hello World") {
+		t.Errorf("expected 'hello World' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunSubWorkflowOutputsPropagation(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "build", `
+name: build
+inputs:
+  tag:
+    required: true
+outputs:
+  result: ${{ jobs.run.outputs.status }}
+jobs:
+  run:
+    outputs:
+      status: ${{ steps.do.outputs.status }}
+    steps:
+      - id: do
+        run: echo "status=deployed-${{ inputs.tag }}" >> $FLOW_OUTPUT
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Outputs: map[string]string{
+				"version": "${{ steps.ver.outputs.version }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "ver", Run: `echo "version=1.0" >> $FLOW_OUTPUT`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"build"},
+			Uses:  "./build",
+			With:  map[string]string{"tag": "${{ needs.build.outputs.version }}"},
+		},
+		"verify": {
+			Needs: []string{"deploy"},
+			Steps: []workflow.Step{
+				{Run: `echo "result=${{ needs.deploy.outputs.result }}"`},
+			},
+		},
+	}, []string{"build", "deploy", "verify"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "result=deployed-1.0") {
+		t.Errorf("expected 'result=deployed-1.0' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunSubWorkflowEnvMerge(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "sub", `
+name: sub
+env:
+  SUB_VAR: from_sub
+jobs:
+  run:
+    steps:
+      - run: echo "$CALLER_VAR $SUB_VAR"
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Env:  map[string]string{"CALLER_VAR": "from_caller"},
+		Jobs: map[string]workflow.Job{
+			"call": {Uses: "./sub"},
+		},
+		JobOrder: []string{"call"},
+	}
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "from_caller from_sub") {
+		t.Errorf("expected 'from_caller from_sub' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunSubWorkflowDepthLimit(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "recursive", `
+name: recursive
+jobs:
+  call:
+    uses: ./recursive
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"call": {Uses: "./recursive"},
+	}, []string{"call"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error for depth limit")
+	}
+	// The error is wrapped in "jobs failed" but the depth error goes to stderr
+	if !strings.Contains(stderr.String(), "maximum workflow depth") {
+		t.Errorf("expected 'maximum workflow depth' in stderr, got: %v", stderr.String())
+	}
+}
+
+func TestRunSubWorkflowNotFound(t *testing.T) {
+	workflowsDir := t.TempDir()
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"call": {Uses: "./nonexistent"},
+	}, []string{"call"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error for not found sub-workflow")
+	}
+	// The error is wrapped in "jobs failed" but the not-found error goes to stderr
+	if !strings.Contains(stderr.String(), "not found") {
+		t.Errorf("expected 'not found' in stderr, got: %v", stderr.String())
+	}
+}

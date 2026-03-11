@@ -164,3 +164,56 @@ func TestExpandExpressionsNeeds(t *testing.T) {
 		})
 	}
 }
+
+func TestExpandWorkflowOutputs(t *testing.T) {
+	jobOutputs := map[string]map[string]string{
+		"build": {"version": "1.0.0", "status": "ok"},
+		"test":  {"result": "passed"},
+	}
+
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "basic jobs substitution",
+			input:    `${{ jobs.build.outputs.version }}`,
+			expected: `1.0.0`,
+		},
+		{
+			name:     "no spaces in braces",
+			input:    `${{jobs.build.outputs.status}}`,
+			expected: `ok`,
+		},
+		{
+			name:     "multiple jobs substitutions",
+			input:    `${{ jobs.build.outputs.version }} ${{ jobs.test.outputs.result }}`,
+			expected: `1.0.0 passed`,
+		},
+		{
+			name:     "unknown job returns empty",
+			input:    `${{ jobs.unknown.outputs.key }}`,
+			expected: ``,
+		},
+		{
+			name:     "unknown key returns empty",
+			input:    `${{ jobs.build.outputs.unknown }}`,
+			expected: ``,
+		},
+		{
+			name:     "no expression unchanged",
+			input:    `hello world`,
+			expected: `hello world`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := expandWorkflowOutputs(tt.input, jobOutputs)
+			if got != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, got)
+			}
+		})
+	}
+}

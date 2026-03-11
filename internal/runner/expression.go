@@ -51,3 +51,22 @@ func expandExpressions(command string, stepOutputs map[string]map[string]string,
 
 	return result
 }
+
+var jobsExpressionPattern = regexp.MustCompile(`\$\{\{\s*jobs\.([a-zA-Z0-9-]+)\.outputs\.([a-zA-Z0-9_-]+)\s*\}\}`)
+
+func expandWorkflowOutputs(expr string, jobOutputs map[string]map[string]string) string {
+	return jobsExpressionPattern.ReplaceAllStringFunc(expr, func(match string) string {
+		parts := jobsExpressionPattern.FindStringSubmatch(match)
+		if len(parts) != 3 {
+			return match
+		}
+		jobName := parts[1]
+		key := parts[2]
+		if outputs, ok := jobOutputs[jobName]; ok {
+			if val, ok := outputs[key]; ok {
+				return val
+			}
+		}
+		return ""
+	})
+}

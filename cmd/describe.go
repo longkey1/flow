@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"sort"
+	"strings"
 
 	"github.com/longkey1/flow/internal/workflow"
 	"github.com/spf13/cobra"
@@ -61,16 +62,43 @@ var describeCmd = &cobra.Command{
 			}
 		}
 
+		if len(wf.Outputs) > 0 {
+			fmt.Fprintln(out)
+			fmt.Fprintln(out, "Outputs:")
+
+			outputNames := make([]string, 0, len(wf.Outputs))
+			for name := range wf.Outputs {
+				outputNames = append(outputNames, name)
+			}
+			sort.Strings(outputNames)
+
+			for _, name := range outputNames {
+				fmt.Fprintf(out, "  %s: %s\n", name, wf.Outputs[name])
+			}
+		}
+
 		if len(wf.Jobs) > 0 {
 			fmt.Fprintln(out)
 			fmt.Fprintln(out, "Jobs:")
 			for _, jobName := range wf.JobOrder {
 				job := wf.Jobs[jobName]
-				fmt.Fprintf(out, "  %s", jobName)
+				parts := []string{}
 				if len(job.Needs) > 0 {
-					fmt.Fprintf(out, " (needs: %s)", join(job.Needs))
+					parts = append(parts, "needs: "+join(job.Needs))
+				}
+				if job.Uses != "" {
+					parts = append(parts, "uses: "+job.Uses)
+				}
+				fmt.Fprintf(out, "  %s", jobName)
+				if len(parts) > 0 {
+					fmt.Fprintf(out, " (%s)", strings.Join(parts, ", "))
 				}
 				fmt.Fprintln(out)
+				if job.Uses != "" && len(job.With) > 0 {
+					for k, v := range job.With {
+						fmt.Fprintf(out, "      %s: %s\n", k, v)
+					}
+				}
 				for _, step := range job.Steps {
 					name := step.Name
 					if name == "" {

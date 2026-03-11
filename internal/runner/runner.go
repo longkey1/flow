@@ -12,13 +12,16 @@ import (
 	"github.com/longkey1/flow/internal/workflow"
 )
 
+const maxWorkflowDepth = 10
+
 type Runner struct {
-	stdin      io.Reader
-	stdout     io.Writer
-	stderr     io.Writer
-	dir        string
-	Quiet      bool
-	ActionsDir string
+	stdin        io.Reader
+	stdout       io.Writer
+	stderr       io.Writer
+	dir          string
+	Quiet        bool
+	ActionsDir   string
+	WorkflowsDir string
 }
 
 func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
@@ -26,10 +29,19 @@ func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
 }
 
 func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
+	_, err := r.run(wf, inputs, 0)
+	return err
+}
+
+func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int) (map[string]string, error) {
+	if depth > maxWorkflowDepth {
+		return nil, fmt.Errorf("maximum workflow depth %d exceeded", maxWorkflowDepth)
+	}
+
 	// Resolve inputs: apply defaults and validate required
 	resolvedInputs, err := resolveInputs(wf, inputs)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	status := make(map[string]string) // "success", "failed", "skipped"
@@ -79,6 +91,36 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 				return
 			}
 			mu.Unlock()
+
+			// Handle job-level uses (reusable workflows)
+			if job.Uses != "" {
+				if !r.Quiet {
+					var buf bytes.Buffer
+					fmt.Fprintf(&buf, "=== Job: %s (uses: %s) ===\n", jobName, job.Uses)
+					mu.Lock()
+					buf.WriteTo(r.stdout)
+					mu.Unlock()
+				}
+
+				mu.Lock()
+				currentJobOutputs := copyJobOutputs(jobOutputs)
+				mu.Unlock()
+
+				subOutputs, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, depth)
+				mu.Lock()
+				if err != nil {
+					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
+					status[jobName] = "failed"
+					failedJobs = append(failedJobs, jobName)
+				} else {
+					if subOutputs != nil {
+						jobOutputs[jobName] = subOutputs
+					}
+					status[jobName] = "success"
+				}
+				mu.Unlock()
+				return
+			}
 
 			// Per-job buffers
 			var stdoutBuf, stderrBuf bytes.Buffer
@@ -193,9 +235,54 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 	wg.Wait()
 
 	if len(failedJobs) > 0 {
-		return fmt.Errorf("jobs failed: %v", failedJobs)
+		return nil, fmt.Errorf("jobs failed: %v", failedJobs)
 	}
-	return nil
+
+	// Resolve workflow-level outputs
+	if len(wf.Outputs) > 0 {
+		resolved := make(map[string]string, len(wf.Outputs))
+		for k, v := range wf.Outputs {
+			resolved[k] = expandWorkflowOutputs(v, jobOutputs)
+		}
+		return resolved, nil
+	}
+
+	return nil, nil
+}
+
+func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, callerInputs map[string]string, callerJobOutputs map[string]map[string]string, depth int) (map[string]string, error) {
+	usesName := strings.TrimPrefix(job.Uses, "./")
+
+	subPath, err := workflow.Find(r.WorkflowsDir, usesName)
+	if err != nil {
+		return nil, fmt.Errorf("sub-workflow %q: %w", usesName, err)
+	}
+	subWf, err := workflow.Load(subPath)
+	if err != nil {
+		return nil, fmt.Errorf("sub-workflow %q: %w", usesName, err)
+	}
+
+	// Resolve with values using caller context
+	resolvedWith := make(map[string]string, len(job.With))
+	for k, v := range job.With {
+		resolvedWith[k] = expandExpressions(v, nil, callerInputs, callerJobOutputs)
+	}
+
+	// Merge caller env into sub-workflow env (sub-workflow env takes precedence)
+	subWf.Env = mergeEnv(callerEnv, subWf.Env)
+
+	// Create sub-runner
+	subRunner := &Runner{
+		stdin:        r.stdin,
+		stdout:       r.stdout,
+		stderr:       r.stderr,
+		dir:          r.dir,
+		Quiet:        r.Quiet,
+		ActionsDir:   r.ActionsDir,
+		WorkflowsDir: r.WorkflowsDir,
+	}
+
+	return subRunner.run(subWf, resolvedWith, depth+1)
 }
 
 // resolveInputs validates and resolves input values, applying defaults where needed.

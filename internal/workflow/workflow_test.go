@@ -574,3 +574,96 @@ jobs:
 		t.Errorf("expected no outputs, got %d", len(wf.Jobs["build"].Outputs))
 	}
 }
+
+func TestParseJobUses(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo build
+  deploy:
+    needs: build
+    uses: ./deploy
+    with:
+      version: "${{ needs.build.outputs.version }}"
+`)
+	job := wf.Jobs["deploy"]
+	if job.Uses != "./deploy" {
+		t.Errorf("expected uses './deploy', got %q", job.Uses)
+	}
+	if job.With["version"] != "${{ needs.build.outputs.version }}" {
+		t.Errorf("expected with version expression, got %q", job.With["version"])
+	}
+}
+
+func TestValidateJobUsesXorSteps(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  deploy:
+    uses: ./deploy
+    steps:
+      - run: echo deploy
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for both uses and steps")
+	}
+	if !strings.Contains(err.Error(), "cannot have both uses and steps") {
+		t.Errorf("expected 'cannot have both uses and steps' error, got: %v", err)
+	}
+}
+
+func TestValidateJobWithWithoutUses(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  deploy:
+    with:
+      key: value
+    steps:
+      - run: echo deploy
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for with without uses")
+	}
+	if !strings.Contains(err.Error(), "has with but no uses") {
+		t.Errorf("expected 'has with but no uses' error, got: %v", err)
+	}
+}
+
+func TestValidateJobUsesOnly(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  deploy:
+    uses: ./deploy
+`)
+	if err := wf.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestParseWorkflowOutputs(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+outputs:
+  result: ${{ jobs.build.outputs.status }}
+  version: ${{ jobs.build.outputs.version }}
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if len(wf.Outputs) != 2 {
+		t.Fatalf("expected 2 workflow outputs, got %d", len(wf.Outputs))
+	}
+	if wf.Outputs["result"] != "${{ jobs.build.outputs.status }}" {
+		t.Errorf("expected result expression, got %q", wf.Outputs["result"])
+	}
+	if wf.Outputs["version"] != "${{ jobs.build.outputs.version }}" {
+		t.Errorf("expected version expression, got %q", wf.Outputs["version"])
+	}
+}

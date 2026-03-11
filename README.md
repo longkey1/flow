@@ -438,6 +438,7 @@ The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`).
 ## Commands
 
 ```
+flow list                                List available workflows (alias: ls)
 flow run <workflow>                      Run a workflow
 flow run <workflow> -i key=value         Pass input values (repeatable)
 flow run <workflow> --debug              Run with detailed output (overrides quiet)

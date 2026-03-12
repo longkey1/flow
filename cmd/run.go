@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/longkey1/flow/internal/runner"
@@ -25,6 +26,14 @@ func actionsDir(baseDir string) string {
 		root = ".flow"
 	}
 	return filepath.Join(baseDir, root, "actions")
+}
+
+func logsDir(baseDir string) string {
+	root := os.Getenv("FLOW_ROOT")
+	if root == "" {
+		root = ".flow"
+	}
+	return filepath.Join(baseDir, root, "logs")
 }
 
 func parseInputFlags(raw []string) (map[string]string, error) {
@@ -69,8 +78,21 @@ var runCmd = &cobra.Command{
 		}
 
 		debug, _ := cmd.Flags().GetBool("debug")
+
+		logMaxRuns := 50
+		if v := os.Getenv("FLOW_LOG_MAX_RUNS"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return fmt.Errorf("FLOW_LOG_MAX_RUNS: %w", err)
+			}
+			logMaxRuns = n
+		}
+
 		r := runner.New(os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), baseDir)
 		r.Quiet = wf.Quiet && !debug
+		r.Debug = debug
+		r.LogDir = logsDir(baseDir)
+		r.LogMaxRuns = logMaxRuns
 		r.ActionsDir = actionsDir(baseDir)
 		r.WorkflowsDir = workflowsDir(baseDir)
 		return r.Run(wf, inputs)

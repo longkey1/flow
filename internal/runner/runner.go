@@ -494,7 +494,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 
 		// Show sub-step name on screen when logging is enabled
 		if logFile != nil && !r.Quiet {
-			fmt.Fprintf(stdout, "> %s\n", subStepName)
+			fmt.Fprintf(stdout, "  > %s\n", subStepName)
 		}
 
 		// Create temp file for FLOW_OUTPUT

@@ -269,6 +269,47 @@ func TestExpandExpressionsMatrix(t *testing.T) {
 	}
 }
 
+func TestExpandVariableRef(t *testing.T) {
+	inputs := map[string]string{"env": "prod", "name": "test"}
+	stepOutputs := map[string]map[string]string{
+		"build": {"version": "1.0.0"},
+	}
+	jobOutputs := map[string]map[string]string{
+		"setup": {"skip": "true", "target": "api"},
+	}
+	matrixValues := map[string]string{"os": "linux"}
+
+	tests := []struct {
+		name     string
+		ref      string
+		expected string
+		ok       bool
+	}{
+		{"inputs ref", "inputs.env", "prod", true},
+		{"inputs unknown", "inputs.unknown", "", true},
+		{"steps ref", "steps.build.outputs.version", "1.0.0", true},
+		{"steps unknown", "steps.unknown.outputs.key", "", true},
+		{"needs ref", "needs.setup.outputs.skip", "true", true},
+		{"needs unknown job", "needs.unknown.outputs.key", "", true},
+		{"matrix ref", "matrix.os", "linux", true},
+		{"matrix unknown", "matrix.unknown", "", true},
+		{"not a variable", "somefunc", "somefunc", false},
+		{"partial match", "inputs", "inputs", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := expandVariableRef(tt.ref, stepOutputs, inputs, jobOutputs, matrixValues)
+			if ok != tt.ok {
+				t.Errorf("expandVariableRef(%q) ok = %v, want %v", tt.ref, ok, tt.ok)
+			}
+			if got != tt.expected {
+				t.Errorf("expandVariableRef(%q) = %q, want %q", tt.ref, got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestResolveMatrixParamStatic(t *testing.T) {
 	param := workflow.MatrixParam{Values: []string{"a", "b", "c"}}
 	values, err := resolveMatrixParam(param, nil, nil)

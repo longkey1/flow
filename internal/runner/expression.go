@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strings"
 
 	"github.com/longkey1/flow/internal/workflow"
 )
@@ -125,6 +126,55 @@ func cartesianProduct(params map[string][]string) []map[string]string {
 		result = newResult
 	}
 	return result
+}
+
+// expandVariableRef resolves a bare variable reference (without ${{ }}) to its value.
+// Supports: inputs.X, steps.ID.outputs.KEY, needs.JOB.outputs.KEY, matrix.KEY.
+// Returns (resolved value, true) if matched, or (ref, false) if not a known variable pattern.
+func expandVariableRef(ref string, stepOutputs map[string]map[string]string, inputs map[string]string, jobOutputs map[string]map[string]string, matrixValues map[string]string) (string, bool) {
+	parts := strings.Split(ref, ".")
+
+	if len(parts) == 2 && parts[0] == "inputs" {
+		if inputs != nil {
+			if val, ok := inputs[parts[1]]; ok {
+				return val, true
+			}
+		}
+		return "", true
+	}
+
+	if len(parts) == 2 && parts[0] == "matrix" {
+		if matrixValues != nil {
+			if val, ok := matrixValues[parts[1]]; ok {
+				return val, true
+			}
+		}
+		return "", true
+	}
+
+	if len(parts) == 4 && parts[0] == "steps" && parts[2] == "outputs" {
+		if stepOutputs != nil {
+			if outputs, ok := stepOutputs[parts[1]]; ok {
+				if val, ok := outputs[parts[3]]; ok {
+					return val, true
+				}
+			}
+		}
+		return "", true
+	}
+
+	if len(parts) == 4 && parts[0] == "needs" && parts[2] == "outputs" {
+		if jobOutputs != nil {
+			if outputs, ok := jobOutputs[parts[1]]; ok {
+				if val, ok := outputs[parts[3]]; ok {
+					return val, true
+				}
+			}
+		}
+		return "", true
+	}
+
+	return ref, false
 }
 
 func expandWorkflowOutputs(expr string, jobOutputs map[string]map[string]string) string {

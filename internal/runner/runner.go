@@ -106,19 +106,15 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 			skip := false
 			if job.If != "" {
 				// Evaluate job-level if condition
-				p := &condParser{
-					input:     expandExpressions(job.If, nil, resolvedInputs, copyJobOutputs(jobOutputs), nil),
-					jobFailed: anyDepFailed,
-				}
-				val, err := p.parseOr()
+				shouldRun, err := evaluateCondition(job.If, anyDepFailed, nil, resolvedInputs, copyJobOutputs(jobOutputs), nil)
 				if err != nil {
-					fmt.Fprintf(r.stderr, "job %q: evaluating if condition: %v\n", jobName, err)
+					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
 					status[jobName] = "failed"
 					failedJobs = append(failedJobs, jobName)
 					mu.Unlock()
 					return
 				}
-				if !isTruthy(val, anyDepFailed) {
+				if !shouldRun {
 					skip = true
 				}
 			} else if anyDepFailed {
@@ -355,14 +351,13 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 
 		// Evaluate if condition
 		if step.If != "" {
-			p := &condParser{input: expandExpressions(step.If, stepOutputs, resolvedInputs, jobOutputs, matrixValues), jobFailed: jobFailed}
-			val, err := p.parseOr()
+			shouldRun, err := evaluateCondition(step.If, jobFailed, stepOutputs, resolvedInputs, jobOutputs, matrixValues)
 			if err != nil {
 				jobFailed = true
-				fmt.Fprintf(stepStderr, "job %q, step %q: evaluating if condition: %v\n", jobName, name, err)
+				fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 				continue
 			}
-			if !isTruthy(val, jobFailed) {
+			if !shouldRun {
 				if !r.Quiet {
 					fmt.Fprintf(stepStdout, "--- Step: %s (skipped) ---\n", name)
 				}

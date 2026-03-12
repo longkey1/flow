@@ -2,17 +2,42 @@ package runner
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 )
+
+var wrappedExprPattern = regexp.MustCompile(`^\s*\$\{\{\s*(.*?)\s*\}\}\s*$`)
+
+// preprocessCondition strips the outer ${{ }} wrapper if the entire condition is wrapped.
+// e.g. "${{ inputs.env != 'prod' }}" → "inputs.env != 'prod'"
+// Partial expressions like "${{ inputs.env }} == 'prod'" are NOT matched.
+func preprocessCondition(condition string) string {
+	m := wrappedExprPattern.FindStringSubmatch(condition)
+	if m != nil {
+		return m[1]
+	}
+	return condition
+}
 
 // evaluateCondition evaluates an if condition string and returns whether the step/job should run.
 // The condition is first expanded using expandExpressions, then parsed and evaluated.
 // Supported: success(), failure(), always(), ==, !=, &&, ||, !, parentheses, string literals.
 func evaluateCondition(condition string, jobFailed bool, stepOutputs map[string]map[string]string, inputs map[string]string, jobOutputs map[string]map[string]string, matrixValues map[string]string) (bool, error) {
-	// Expand ${{ }} expressions in the condition
-	expanded := expandExpressions(condition, stepOutputs, inputs, jobOutputs, matrixValues)
+	// Strip outer ${{ }} wrapper to allow expressions like ${{ inputs.env != 'prod' }}
+	preprocessed := preprocessCondition(condition)
 
-	p := &condParser{input: expanded, pos: 0, jobFailed: jobFailed}
+	// Expand remaining ${{ }} expressions (for partial patterns like ${{ inputs.env }} == 'prod')
+	expanded := expandExpressions(preprocessed, stepOutputs, inputs, jobOutputs, matrixValues)
+
+	p := &condParser{
+		input:        expanded,
+		pos:          0,
+		jobFailed:    jobFailed,
+		stepOutputs:  stepOutputs,
+		inputs:       inputs,
+		jobOutputs:   jobOutputs,
+		matrixValues: matrixValues,
+	}
 	result, err := p.parseOr()
 	if err != nil {
 		return false, fmt.Errorf("evaluating condition %q: %w", condition, err)
@@ -60,9 +85,13 @@ func stringValue(s string) condValue {
 }
 
 type condParser struct {
-	input     string
-	pos       int
-	jobFailed bool
+	input        string
+	pos          int
+	jobFailed    bool
+	stepOutputs  map[string]map[string]string
+	inputs       map[string]string
+	jobOutputs   map[string]map[string]string
+	matrixValues map[string]string
 }
 
 func (p *condParser) skipSpaces() {
@@ -234,6 +263,12 @@ func (p *condParser) parsePrimary() (condValue, error) {
 	if word == "false" {
 		return boolValue(false), nil
 	}
+
+	// Try to resolve as a variable reference (inputs.X, needs.J.outputs.K, etc.)
+	if resolved, ok := expandVariableRef(word, p.stepOutputs, p.inputs, p.jobOutputs, p.matrixValues); ok {
+		return stringValue(resolved), nil
+	}
+
 	return stringValue(word), nil
 }
 

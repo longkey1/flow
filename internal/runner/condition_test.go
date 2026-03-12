@@ -189,6 +189,104 @@ func TestConditionUnknownFunction(t *testing.T) {
 	}
 }
 
+func TestPreprocessCondition(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{"${{ inputs.env != 'prod' }}", "inputs.env != 'prod'"},
+		{"${{ needs.setup.outputs.skip != 'true' }}", "needs.setup.outputs.skip != 'true'"},
+		{"${{ success() && inputs.deploy == 'true' }}", "success() && inputs.deploy == 'true'"},
+		{"${{ inputs.env }} == 'prod'", "${{ inputs.env }} == 'prod'"}, // partial - not stripped
+		{"success()", "success()"},                                     // no wrapper
+		{"  ${{  inputs.x  }}  ", "inputs.x"},                          // extra whitespace
+	}
+	for _, tt := range tests {
+		got := preprocessCondition(tt.input)
+		if got != tt.expected {
+			t.Errorf("preprocessCondition(%q) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
+
+func TestConditionWrappedExpression(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+		inputs    map[string]string
+		jobOut    map[string]map[string]string
+		stepOut   map[string]map[string]string
+		expected  bool
+	}{
+		{
+			name:      "inputs != in wrapped expression",
+			condition: "${{ inputs.env != 'prod' }}",
+			inputs:    map[string]string{"env": "staging"},
+			expected:  true,
+		},
+		{
+			name:      "inputs == in wrapped expression (false)",
+			condition: "${{ inputs.env != 'prod' }}",
+			inputs:    map[string]string{"env": "prod"},
+			expected:  false,
+		},
+		{
+			name:      "needs reference in wrapped expression",
+			condition: "${{ needs.setup.outputs.skip != 'true' }}",
+			jobOut:    map[string]map[string]string{"setup": {"skip": "false"}},
+			expected:  true,
+		},
+		{
+			name:      "needs reference skip=true",
+			condition: "${{ needs.setup.outputs.skip != 'true' }}",
+			jobOut:    map[string]map[string]string{"setup": {"skip": "true"}},
+			expected:  false,
+		},
+		{
+			name:      "success() && inputs in wrapped expression",
+			condition: "${{ success() && inputs.deploy == 'true' }}",
+			inputs:    map[string]string{"deploy": "true"},
+			expected:  true,
+		},
+		{
+			name:      "success() && inputs false",
+			condition: "${{ success() && inputs.deploy == 'true' }}",
+			inputs:    map[string]string{"deploy": "false"},
+			expected:  false,
+		},
+		{
+			name:      "steps reference in wrapped expression",
+			condition: "${{ steps.check.outputs.result == 'ok' }}",
+			stepOut:   map[string]map[string]string{"check": {"result": "ok"}},
+			expected:  true,
+		},
+		{
+			name:      "backward compat: partial expression",
+			condition: "${{ inputs.env }} == 'prod'",
+			inputs:    map[string]string{"env": "prod"},
+			expected:  true,
+		},
+		{
+			name:      "backward compat: failure with partial expression",
+			condition: "failure() || ${{ inputs.force }} == 'true'",
+			inputs:    map[string]string{"force": "true"},
+			expected:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := evaluateCondition(tt.condition, false, tt.stepOut, tt.inputs, tt.jobOut, nil)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if result != tt.expected {
+				t.Errorf("evaluateCondition(%q) = %v, want %v", tt.condition, result, tt.expected)
+			}
+		})
+	}
+}
+
 func TestConditionBoolLiterals(t *testing.T) {
 	result, err := evaluateCondition("true", false, nil, nil, nil, nil)
 	if err != nil {

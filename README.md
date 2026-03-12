@@ -174,7 +174,8 @@ jobs:
 - `if: always()` — always run, regardless of dependency status
 - `if: failure()` — run only when a dependency has failed
 - `if: success()` — run only when all dependencies succeeded (this is the default)
-- Comparison expressions are also supported: `if: ${{ inputs.target }} == 'prod'`
+- Comparison expressions: `if: ${{ inputs.target }} == 'prod'` or `if: ${{ inputs.target == 'prod' }}`
+- Variable references inside `${{ }}`: `inputs.X`, `needs.job.outputs.key`, `steps.id.outputs.key`, `matrix.key`
 - Logical operators: `&&`, `||`, `!`, and parentheses for grouping
 
 #### Job Outputs
@@ -345,7 +346,7 @@ jobs:
         run: echo "cleanup (always runs)"
       - if: failure()
         run: echo "error handler (runs only on failure)"
-      - if: ${{ inputs.env }} == 'prod'
+      - if: ${{ inputs.env == 'prod' }}
         run: echo "production only"
 ```
 
@@ -353,6 +354,8 @@ jobs:
 - `if: failure()` — run only when a previous step has failed
 - `if: success()` — run only when all previous steps succeeded (default behavior)
 - Comparison: `==`, `!=` with string literals (`'value'`) or expanded expressions
+- Expressions can be written as `${{ expr }}` (GitHub Actions style) or `${{ var }} == 'val'`
+- Variable references inside `${{ }}`: `inputs.X`, `needs.job.outputs.key`, `steps.id.outputs.key`, `matrix.key`
 - Logical operators: `&&`, `||`, `!`, and parentheses
 - Truthy/falsy: empty string, `"false"`, `"0"` are falsy; everything else is truthy
 

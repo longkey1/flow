@@ -1306,3 +1306,243 @@ func TestRunMatrixOneFailure(t *testing.T) {
 		t.Errorf("expected 'jobs failed' error, got: %v", err)
 	}
 }
+
+func TestRunStepIfAlways(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: "exit 1"},
+			{If: "always()", Run: `echo "cleanup ran"`},
+		}},
+	}, []string{"build"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when step fails")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "cleanup ran") {
+		t.Errorf("expected cleanup step to run with always(), got:\n%s", out)
+	}
+}
+
+func TestRunStepIfFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: "exit 1"},
+			{If: "failure()", Run: `echo "error handler ran"`},
+		}},
+	}, []string{"build"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when step fails")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "error handler ran") {
+		t.Errorf("expected error handler to run with failure(), got:\n%s", out)
+	}
+}
+
+func TestRunStepIfFailureNotTriggeredOnSuccess(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: "echo ok"},
+			{Name: "error handler", If: "failure()", Run: `echo "FAILURE_OUTPUT"`},
+			{Run: `echo "after failure check"`},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if strings.Contains(out, "FAILURE_OUTPUT") {
+		t.Errorf("failure() step should not produce output when no failure, got:\n%s", out)
+	}
+	if !strings.Contains(out, "after failure check") {
+		t.Errorf("expected subsequent step to run, got:\n%s", out)
+	}
+}
+
+func TestRunStepIfComparison(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"env": {Default: "prod"},
+		},
+		Jobs: map[string]workflow.Job{
+			"build": {Steps: []workflow.Step{
+				{Name: "prod step", If: "${{ inputs.env }} == 'prod'", Run: `echo "PROD_OUTPUT"`},
+				{Name: "staging step", If: "${{ inputs.env }} == 'staging'", Run: `echo "STAGING_OUTPUT"`},
+			}},
+		},
+		JobOrder: []string{"build"},
+	}
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "PROD_OUTPUT") {
+		t.Errorf("expected prod step to run, got:\n%s", out)
+	}
+	if strings.Contains(out, "STAGING_OUTPUT") {
+		t.Errorf("staging step should not run, got:\n%s", out)
+	}
+}
+
+func TestRunStepIfSkippedDisplay(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: "exit 1"},
+			{Name: "Normal Step", Run: `echo "should be skipped"`},
+			{Name: "Cleanup", If: "always()", Run: `echo "cleanup"`},
+		}},
+	}, []string{"build"})
+
+	r.Run(wf, nil)
+	out := stdout.String()
+	if !strings.Contains(out, "--- Step: Normal Step (skipped) ---") {
+		t.Errorf("expected Normal Step to be skipped, got:\n%s", out)
+	}
+	if !strings.Contains(out, "--- Step: Cleanup ---") {
+		t.Errorf("expected Cleanup to show as running, got:\n%s", out)
+	}
+}
+
+func TestRunJobIfAlways(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build":   {Steps: []workflow.Step{{Run: "exit 1"}}},
+		"cleanup": {If: "always()", Needs: []string{"build"}, Steps: []workflow.Step{{Run: `echo "cleanup ran"`}}},
+	}, []string{"build", "cleanup"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when job fails")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "cleanup ran") {
+		t.Errorf("expected cleanup job to run with always(), got:\n%s", out)
+	}
+	if strings.Contains(out, "=== Job: cleanup (skipped) ===") {
+		t.Errorf("cleanup should not be skipped, got:\n%s", out)
+	}
+}
+
+func TestRunJobIfFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build":      {Steps: []workflow.Step{{Run: "exit 1"}}},
+		"on-failure": {If: "failure()", Needs: []string{"build"}, Steps: []workflow.Step{{Run: `echo "failure handler ran"`}}},
+	}, []string{"build", "on-failure"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when job fails")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "failure handler ran") {
+		t.Errorf("expected failure handler to run, got:\n%s", out)
+	}
+}
+
+func TestRunJobIfFailureNotTriggeredOnSuccess(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build":      {Steps: []workflow.Step{{Run: "echo ok"}}},
+		"on-failure": {If: "failure()", Needs: []string{"build"}, Steps: []workflow.Step{{Run: `echo "should not run"`}}},
+	}, []string{"build", "on-failure"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if strings.Contains(out, "should not run") {
+		t.Errorf("failure() job should not run when deps succeed, got:\n%s", out)
+	}
+}
+
+func TestRunJobIfComparison(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := &workflow.Workflow{
+		Name: "test",
+		Inputs: map[string]workflow.Input{
+			"target": {Default: "prod"},
+		},
+		Jobs: map[string]workflow.Job{
+			"build": {Steps: []workflow.Step{{Run: "echo build"}}},
+			"deploy-prod": {
+				If:    "${{ inputs.target }} == 'prod'",
+				Needs: []string{"build"},
+				Steps: []workflow.Step{{Run: `echo "prod deploy"`}},
+			},
+			"deploy-staging": {
+				If:    "${{ inputs.target }} == 'staging'",
+				Needs: []string{"build"},
+				Steps: []workflow.Step{{Run: `echo "staging deploy"`}},
+			},
+		},
+		JobOrder: []string{"build", "deploy-prod", "deploy-staging"},
+	}
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "prod deploy") {
+		t.Errorf("expected prod deploy to run, got:\n%s", out)
+	}
+	if strings.Contains(out, "staging deploy") {
+		t.Errorf("staging deploy should be skipped, got:\n%s", out)
+	}
+}
+
+func TestRunBackwardCompatibilityNoIf(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	// Without if: same behavior as before (step failure stops remaining steps)
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: "echo first"},
+			{Run: "exit 1"},
+			{Name: "third step", Run: `echo "THIRD_OUTPUT"`},
+		}},
+	}, []string{"build"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when step fails")
+	}
+	out := stdout.String()
+	if !strings.Contains(out, "first") {
+		t.Errorf("expected first step to run, got:\n%s", out)
+	}
+	if strings.Contains(out, "THIRD_OUTPUT") {
+		t.Errorf("third step should not produce output when skipped, got:\n%s", out)
+	}
+}

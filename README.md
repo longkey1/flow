@@ -48,6 +48,7 @@ outputs:                    # Optional: workflow-level outputs (for reusable wor
   result: ${{ jobs.build.outputs.status }}
 jobs:
   job-name:
+    if: always()           # Optional: conditional execution (success(), failure(), always(), comparisons)
     needs: [dependency]    # Optional: jobs that must complete first
     outputs:                # Optional: job-level outputs
       version: ${{ steps.ver.outputs.version }}
@@ -65,6 +66,7 @@ jobs:
     steps:
       - id: step-id        # Optional: identifier for referencing outputs
         name: Display Name  # Optional: shown in output
+        if: always()        # Optional: conditional execution
         run: echo "hello"   # Required: shell command to execute
         shell: bash         # Optional: override shell for this step (sh or bash)
         uses: ./action      # Optional: reference an action (mutually exclusive with run)
@@ -141,9 +143,39 @@ needs: build          # single dependency
 needs: [build, lint]  # multiple dependencies
 ```
 
-If a job fails, all dependent jobs are skipped. Independent jobs continue to run.
+If a job fails, all dependent jobs are skipped (by default). Independent jobs continue to run.
 
 Each job's output (stdout/stderr) is buffered and flushed as a unit when the job completes, preventing interleaved output from parallel jobs.
+
+#### Conditional Execution (`if`)
+
+Jobs can use `if` to control execution based on the status of their dependencies:
+
+```yaml
+name: pipeline
+jobs:
+  build:
+    steps:
+      - run: exit 1
+
+  cleanup:
+    if: always()
+    needs: build
+    steps:
+      - run: echo "always runs, even if build fails"
+
+  on-failure:
+    if: failure()
+    needs: build
+    steps:
+      - run: echo "runs only when build fails"
+```
+
+- `if: always()` — always run, regardless of dependency status
+- `if: failure()` — run only when a dependency has failed
+- `if: success()` — run only when all dependencies succeeded (this is the default)
+- Comparison expressions are also supported: `if: ${{ inputs.target }} == 'prod'`
+- Logical operators: `&&`, `||`, `!`, and parentheses for grouping
 
 #### Job Outputs
 
@@ -301,7 +333,28 @@ jobs:
 
 ### Steps
 
-Steps within a job execute sequentially and stop on the first failure.
+Steps within a job execute sequentially. By default, if a step fails, subsequent steps are skipped (equivalent to `if: success()`). Use `if` to control step execution:
+
+```yaml
+name: resilient
+jobs:
+  build:
+    steps:
+      - run: exit 1
+      - if: always()
+        run: echo "cleanup (always runs)"
+      - if: failure()
+        run: echo "error handler (runs only on failure)"
+      - if: ${{ inputs.env }} == 'prod'
+        run: echo "production only"
+```
+
+- `if: always()` — always run, even if previous steps failed
+- `if: failure()` — run only when a previous step has failed
+- `if: success()` — run only when all previous steps succeeded (default behavior)
+- Comparison: `==`, `!=` with string literals (`'value'`) or expanded expressions
+- Logical operators: `&&`, `||`, `!`, and parentheses
+- Truthy/falsy: empty string, `"false"`, `"0"` are falsy; everything else is truthy
 
 Steps support interactive input from the terminal (e.g., `read`, `select`):
 

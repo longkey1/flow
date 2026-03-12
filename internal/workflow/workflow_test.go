@@ -846,6 +846,78 @@ jobs:
 	}
 }
 
+func TestParseStepIf(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: exit 1
+      - if: always()
+        run: echo "cleanup"
+      - if: failure()
+        run: echo "error handler"
+      - run: echo "normal step"
+`)
+	steps := wf.Jobs["build"].Steps
+	if steps[0].If != "" {
+		t.Errorf("expected empty if, got %q", steps[0].If)
+	}
+	if steps[1].If != "always()" {
+		t.Errorf("expected if 'always()', got %q", steps[1].If)
+	}
+	if steps[2].If != "failure()" {
+		t.Errorf("expected if 'failure()', got %q", steps[2].If)
+	}
+	if steps[3].If != "" {
+		t.Errorf("expected empty if, got %q", steps[3].If)
+	}
+}
+
+func TestParseJobIf(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo build
+  cleanup:
+    if: always()
+    needs: build
+    steps:
+      - run: echo cleanup
+  on-failure:
+    if: failure()
+    needs: build
+    steps:
+      - run: echo "error handler"
+`)
+	if wf.Jobs["build"].If != "" {
+		t.Errorf("expected empty if for build, got %q", wf.Jobs["build"].If)
+	}
+	if wf.Jobs["cleanup"].If != "always()" {
+		t.Errorf("expected if 'always()' for cleanup, got %q", wf.Jobs["cleanup"].If)
+	}
+	if wf.Jobs["on-failure"].If != "failure()" {
+		t.Errorf("expected if 'failure()' for on-failure, got %q", wf.Jobs["on-failure"].If)
+	}
+}
+
+func TestParseStepIfWithComparison(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - if: ${{ inputs.env }} == 'prod'
+        run: echo "production only"
+`)
+	step := wf.Jobs["build"].Steps[0]
+	if step.If != "${{ inputs.env }} == 'prod'" {
+		t.Errorf("expected if comparison, got %q", step.If)
+	}
+}
+
 func TestParseMatrixWithUses(t *testing.T) {
 	wf := parseWorkflow(t, `
 name: test

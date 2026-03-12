@@ -20,6 +20,7 @@ type Input struct {
 type Step struct {
 	Id    string            `yaml:"id"`
 	Name  string            `yaml:"name"`
+	If    string            `yaml:"if"`
 	Run   string            `yaml:"run"`
 	Shell string            `yaml:"shell"`
 	Uses  string            `yaml:"uses"`
@@ -46,6 +47,7 @@ type Strategy struct {
 
 type Job struct {
 	Needs    []string          `yaml:"-"`
+	If       string            `yaml:"-"`
 	Outputs  map[string]string `yaml:"-"`
 	Uses     string            `yaml:"-"`
 	With     map[string]string `yaml:"-"`
@@ -133,6 +135,9 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 								return fmt.Errorf("decoding outputs for job %q: %w", jobKey.Value, err)
 							}
 							job.Outputs = outputs
+						}
+						if jobVal.Content[k].Value == "if" {
+							job.If = jobVal.Content[k+1].Value
 						}
 						if jobVal.Content[k].Value == "uses" {
 							job.Uses = jobVal.Content[k+1].Value

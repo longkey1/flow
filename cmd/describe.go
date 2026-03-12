@@ -83,6 +83,9 @@ var describeCmd = &cobra.Command{
 			for _, jobName := range wf.JobOrder {
 				job := wf.Jobs[jobName]
 				parts := []string{}
+				if job.If != "" {
+					parts = append(parts, "if: "+job.If)
+				}
 				if len(job.Needs) > 0 {
 					parts = append(parts, "needs: "+join(job.Needs))
 				}
@@ -120,7 +123,12 @@ var describeCmd = &cobra.Command{
 							name = step.Run
 						}
 					}
-					fmt.Fprintf(out, "    - %s\n", name)
+					if step.If != "" {
+						fmt.Fprintf(out, "    - %s\n", name)
+						fmt.Fprintf(out, "        if: %s\n", step.If)
+					} else {
+						fmt.Fprintf(out, "    - %s\n", name)
+					}
 					if step.Uses != "" && len(step.With) > 0 {
 						for k, v := range step.With {
 							fmt.Fprintf(out, "        %s: %s\n", k, v)

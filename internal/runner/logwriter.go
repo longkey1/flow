@@ -55,19 +55,17 @@ func (lf *LogFile) Close() error {
 // PrefixedWriter is an io.Writer that buffers incomplete lines and writes
 // complete lines with a timestamp and prefix.
 type PrefixedWriter struct {
-	prefix   string
-	isStderr bool
-	dest     *LogFile
-	buf      []byte
-	mu       sync.Mutex
+	prefix string
+	dest   *LogFile
+	buf    []byte
+	mu     sync.Mutex
 }
 
 // NewPrefixedWriter creates a new PrefixedWriter.
-func NewPrefixedWriter(dest *LogFile, prefix string, isStderr bool) *PrefixedWriter {
+func NewPrefixedWriter(dest *LogFile, prefix string) *PrefixedWriter {
 	return &PrefixedWriter{
-		prefix:   prefix,
-		isStderr: isStderr,
-		dest:     dest,
+		prefix: prefix,
+		dest:   dest,
 	}
 }
 
@@ -110,12 +108,7 @@ func (pw *PrefixedWriter) Flush() error {
 
 func (pw *PrefixedWriter) writeLine(line string) error {
 	timestamp := time.Now().Format(time.RFC3339)
-	var formatted string
-	if pw.isStderr {
-		formatted = fmt.Sprintf("%s [%s] [stderr] %s\n", timestamp, pw.prefix, line)
-	} else {
-		formatted = fmt.Sprintf("%s [%s] %s\n", timestamp, pw.prefix, line)
-	}
+	formatted := fmt.Sprintf("%s [%s] %s\n", timestamp, pw.prefix, line)
 	_, err := pw.dest.Write([]byte(formatted))
 	return err
 }

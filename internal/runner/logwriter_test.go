@@ -17,7 +17,7 @@ func TestPrefixedWriterCompleteLine(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "build/Compile", false)
+	pw := NewPrefixedWriter(lf, "build/Compile")
 	pw.Write([]byte("hello world\n"))
 
 	data, _ := os.ReadFile(lf.Path())
@@ -31,7 +31,7 @@ func TestPrefixedWriterCompleteLine(t *testing.T) {
 	}
 }
 
-func TestPrefixedWriterStderr(t *testing.T) {
+func TestPrefixedWriterStderrNoTag(t *testing.T) {
 	dir := t.TempDir()
 	lf, err := NewLogFile(dir, "test")
 	if err != nil {
@@ -39,13 +39,16 @@ func TestPrefixedWriterStderr(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "build/Deploy", true)
+	pw := NewPrefixedWriter(lf, "build/Deploy")
 	pw.Write([]byte("error occurred\n"))
 
 	data, _ := os.ReadFile(lf.Path())
 	line := string(data)
-	if !strings.Contains(line, "[build/Deploy] [stderr] error occurred") {
-		t.Errorf("expected stderr prefix, got: %s", line)
+	if !strings.Contains(line, "[build/Deploy] error occurred") {
+		t.Errorf("expected prefixed line without [stderr], got: %s", line)
+	}
+	if strings.Contains(line, "[stderr]") {
+		t.Errorf("expected no [stderr] tag, got: %s", line)
 	}
 }
 
@@ -57,7 +60,7 @@ func TestPrefixedWriterPartialLines(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "job/step", false)
+	pw := NewPrefixedWriter(lf, "job/step")
 
 	// Write partial line
 	pw.Write([]byte("hel"))
@@ -82,7 +85,7 @@ func TestPrefixedWriterMultipleLines(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "job/step", false)
+	pw := NewPrefixedWriter(lf, "job/step")
 	pw.Write([]byte("line1\nline2\nline3\n"))
 
 	data, _ := os.ReadFile(lf.Path())
@@ -106,7 +109,7 @@ func TestPrefixedWriterFlush(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "job/step", false)
+	pw := NewPrefixedWriter(lf, "job/step")
 	pw.Write([]byte("no newline"))
 
 	// Should have no output yet
@@ -131,7 +134,7 @@ func TestPrefixedWriterFlushEmpty(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "job/step", false)
+	pw := NewPrefixedWriter(lf, "job/step")
 	if err := pw.Flush(); err != nil {
 		t.Errorf("flush on empty buffer should not error, got: %v", err)
 	}
@@ -145,7 +148,7 @@ func TestPrefixedWriterConcurrent(t *testing.T) {
 	}
 	defer lf.Close()
 
-	pw := NewPrefixedWriter(lf, "job/step", false)
+	pw := NewPrefixedWriter(lf, "job/step")
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {

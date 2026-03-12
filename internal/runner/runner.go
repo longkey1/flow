@@ -274,6 +274,12 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 	// Merge workflow env → job env
 	jobEnv := mergeEnv(wfEnv, job.Env)
 
+	// Resolve default shell from job defaults
+	var defaultShell string
+	if job.Defaults != nil {
+		defaultShell = job.Defaults.Run.Shell
+	}
+
 	stepOutputs := make(map[string]map[string]string)
 	jobFailed := false
 	for _, step := range job.Steps {
@@ -322,7 +328,12 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 			env = append(env, k+"="+v)
 		}
 		env = append(env, "FLOW_OUTPUT="+outputPath)
-		if err := runShell(command, r.dir, r.stdin, stdout, stderr, env); err != nil {
+		// Resolve shell: step.Shell > job defaults > "sh"
+		shell := step.Shell
+		if shell == "" {
+			shell = defaultShell
+		}
+		if err := runShell(command, r.dir, shell, r.stdin, stdout, stderr, env); err != nil {
 			os.Remove(outputPath)
 			jobFailed = true
 			fmt.Fprintf(stderr, "job %q, step %q: %v\n", jobName, name, err)
@@ -450,7 +461,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		}
 		env = append(env, "FLOW_OUTPUT="+outputPath)
 
-		if err := runShell(command, r.dir, r.stdin, stdout, stderr, env); err != nil {
+		if err := runShell(command, r.dir, "", r.stdin, stdout, stderr, env); err != nil {
 			os.Remove(outputPath)
 			return nil, err
 		}

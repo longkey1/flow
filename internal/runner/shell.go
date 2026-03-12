@@ -7,8 +7,11 @@ import (
 	"os/exec"
 )
 
-func runShell(command, dir string, stdin io.Reader, stdout, stderr io.Writer, env []string) error {
-	cmd := exec.Command("sh", "-c", command)
+func runShell(command, dir, shell string, stdin io.Reader, stdout, stderr io.Writer, env []string) error {
+	if shell == "" {
+		shell = "sh"
+	}
+	cmd := exec.Command(shell, "-c", command)
 	cmd.Dir = dir
 	cmd.Stdin = stdin
 	cmd.Stdout = stdout

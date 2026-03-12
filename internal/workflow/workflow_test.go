@@ -740,6 +740,112 @@ jobs:
 	}
 }
 
+func TestParseStepShell(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+        shell: bash
+      - run: echo world
+`)
+	steps := wf.Jobs["build"].Steps
+	if steps[0].Shell != "bash" {
+		t.Errorf("expected shell 'bash', got %q", steps[0].Shell)
+	}
+	if steps[1].Shell != "" {
+		t.Errorf("expected empty shell, got %q", steps[1].Shell)
+	}
+}
+
+func TestParseJobDefaults(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - run: echo hello
+`)
+	job := wf.Jobs["build"]
+	if job.Defaults == nil {
+		t.Fatal("expected defaults to be set")
+	}
+	if job.Defaults.Run.Shell != "bash" {
+		t.Errorf("expected defaults.run.shell 'bash', got %q", job.Defaults.Run.Shell)
+	}
+}
+
+func TestParseJobDefaultsEmpty(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+`)
+	if wf.Jobs["build"].Defaults != nil {
+		t.Errorf("expected nil defaults, got %v", wf.Jobs["build"].Defaults)
+	}
+}
+
+func TestValidateInvalidStepShell(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+        shell: zsh
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid shell")
+	}
+	if !strings.Contains(err.Error(), "invalid shell") {
+		t.Errorf("expected 'invalid shell' error, got: %v", err)
+	}
+}
+
+func TestValidateInvalidJobDefaultsShell(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    defaults:
+      run:
+        shell: fish
+    steps:
+      - run: echo hello
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected error for invalid defaults.run.shell")
+	}
+	if !strings.Contains(err.Error(), "invalid defaults.run.shell") {
+		t.Errorf("expected 'invalid defaults.run.shell' error, got: %v", err)
+	}
+}
+
+func TestValidateValidShells(t *testing.T) {
+	for _, shell := range []string{"sh", "bash"} {
+		wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    steps:
+      - run: echo hello
+        shell: `+shell+`
+`)
+		if err := wf.Validate(); err != nil {
+			t.Fatalf("unexpected validation error for shell %q: %v", shell, err)
+		}
+	}
+}
+
 func TestParseMatrixWithUses(t *testing.T) {
 	wf := parseWorkflow(t, `
 name: test

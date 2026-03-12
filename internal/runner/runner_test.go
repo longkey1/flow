@@ -1199,6 +1199,88 @@ func TestRunMatrixParallel(t *testing.T) {
 	}
 }
 
+func TestRunStepShellBash(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: `[[ "hello" == "hello" ]] && echo "bash works"`, Shell: "bash"},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "bash works") {
+		t.Errorf("expected 'bash works' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunJobDefaultsShell(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Defaults: &workflow.Defaults{
+				Run: workflow.RunDefaults{Shell: "bash"},
+			},
+			Steps: []workflow.Step{
+				{Run: `[[ "hello" == "hello" ]] && echo "defaults bash works"`},
+			},
+		},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "defaults bash works") {
+		t.Errorf("expected 'defaults bash works' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunStepShellOverridesJobDefaults(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Defaults: &workflow.Defaults{
+				Run: workflow.RunDefaults{Shell: "bash"},
+			},
+			Steps: []workflow.Step{
+				{Run: `echo "using sh"`, Shell: "sh"},
+			},
+		},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "using sh") {
+		t.Errorf("expected 'using sh' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunDefaultShellIsSh(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{
+			{Run: `echo "default sh"`},
+		}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "default sh") {
+		t.Errorf("expected 'default sh' in output, got:\n%s", stdout.String())
+	}
+}
+
 func TestRunMatrixOneFailure(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	r := New(nil, &stdout, &stderr, "")

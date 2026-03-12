@@ -9,6 +9,7 @@ import (
 
 var validIDPattern = regexp.MustCompile(`^[a-zA-Z0-9-]+$`)
 var validInputNamePattern = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
+var validShells = map[string]bool{"": true, "sh": true, "bash": true}
 
 type Input struct {
 	Description string `yaml:"description"`
@@ -17,12 +18,21 @@ type Input struct {
 }
 
 type Step struct {
-	Id   string            `yaml:"id"`
-	Name string            `yaml:"name"`
-	Run  string            `yaml:"run"`
-	Uses string            `yaml:"uses"`
-	With map[string]string `yaml:"with"`
-	Env  map[string]string `yaml:"env"`
+	Id    string            `yaml:"id"`
+	Name  string            `yaml:"name"`
+	Run   string            `yaml:"run"`
+	Shell string            `yaml:"shell"`
+	Uses  string            `yaml:"uses"`
+	With  map[string]string `yaml:"with"`
+	Env   map[string]string `yaml:"env"`
+}
+
+type RunDefaults struct {
+	Shell string `yaml:"shell"`
+}
+
+type Defaults struct {
+	Run RunDefaults `yaml:"run"`
 }
 
 type MatrixParam struct {
@@ -40,6 +50,7 @@ type Job struct {
 	Uses     string            `yaml:"-"`
 	With     map[string]string `yaml:"-"`
 	Strategy *Strategy         `yaml:"-"`
+	Defaults *Defaults         `yaml:"-"`
 	Steps    []Step            `yaml:"steps"`
 	Env      map[string]string `yaml:"env"`
 }
@@ -137,6 +148,14 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 							}
 							job.With = withMap
 						}
+						if jobVal.Content[k].Value == "defaults" {
+							defaultsNode := jobVal.Content[k+1]
+							var defaults Defaults
+							if err := defaultsNode.Decode(&defaults); err != nil {
+								return fmt.Errorf("decoding defaults for job %q: %w", jobKey.Value, err)
+							}
+							job.Defaults = &defaults
+						}
 						if jobVal.Content[k].Value == "strategy" {
 							strategyNode := jobVal.Content[k+1]
 							if strategyNode.Kind != yaml.MappingNode {
@@ -204,6 +223,11 @@ func (w *Workflow) Validate() error {
 				}
 			}
 		}
+		if job.Defaults != nil {
+			if !validShells[job.Defaults.Run.Shell] {
+				return fmt.Errorf("job %q has invalid defaults.run.shell %q: must be sh or bash", jobName, job.Defaults.Run.Shell)
+			}
+		}
 		if job.Uses != "" && len(job.Steps) > 0 {
 			return fmt.Errorf("job %q cannot have both uses and steps", jobName)
 		}
@@ -226,6 +250,9 @@ func (w *Workflow) Validate() error {
 				}
 				if step.Uses == "" && len(step.With) > 0 {
 					return fmt.Errorf("step %d in job %q has with but no uses", i+1, jobName)
+				}
+				if !validShells[step.Shell] {
+					return fmt.Errorf("step %d in job %q has invalid shell %q: must be sh or bash", i+1, jobName, step.Shell)
 				}
 				if step.Id != "" {
 					if !validIDPattern.MatchString(step.Id) {

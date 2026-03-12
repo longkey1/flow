@@ -56,6 +56,9 @@ jobs:
         key: ["val1", "val2"]
     env:                    # Optional: job-level environment variables
       JOB_VAR: value
+    defaults:               # Optional: default settings for steps
+      run:
+        shell: bash         # Optional: default shell for steps in this job (sh or bash)
     uses: ./other-workflow  # Optional: reference a reusable workflow (mutually exclusive with steps)
     with:                    # Optional: inputs for uses or matrix expressions
       input_key: value
@@ -63,6 +66,10 @@ jobs:
       - id: step-id        # Optional: identifier for referencing outputs
         name: Display Name  # Optional: shown in output
         run: echo "hello"   # Required: shell command to execute
+        shell: bash         # Optional: override shell for this step (sh or bash)
+        uses: ./action      # Optional: reference an action (mutually exclusive with run)
+        with:                # Optional: inputs for action
+          input_key: value
         env:                # Optional: step-level environment variables
           STEP_VAR: value
 ```
@@ -275,9 +282,26 @@ Notes:
 - Output displays the matrix label: `=== Job: deploy [target=api] ===`
 - If any combination fails, the job is marked as failed
 
+### Shell Configuration
+
+By default, steps run via `sh -c`. You can change the shell at the job level (applying to all steps) or at the step level (overriding the job default). Valid values are `sh` and `bash`.
+
+```yaml
+name: shell-example
+jobs:
+  build:
+    defaults:
+      run:
+        shell: bash          # all steps in this job use bash
+    steps:
+      - run: echo "running in bash"
+      - run: echo "running in sh"
+        shell: sh            # override for this step only
+```
+
 ### Steps
 
-Each step runs a shell command via `sh -c`. Steps within a job execute sequentially and stop on the first failure.
+Steps within a job execute sequentially and stop on the first failure.
 
 Steps support interactive input from the terminal (e.g., `read`, `select`):
 

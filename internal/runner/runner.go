@@ -128,23 +128,31 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int)
 						matrixLabel := formatMatrixLabel(matrixValues)
 
 						if job.Uses != "" {
+							var stdoutBuf, stderrBuf bytes.Buffer
 							if !r.Quiet {
-								var buf bytes.Buffer
-								fmt.Fprintf(&buf, "=== Job: %s [%s] (uses: %s) ===\n", jobName, matrixLabel, job.Uses)
-								mu.Lock()
-								buf.WriteTo(r.stdout)
-								mu.Unlock()
+								fmt.Fprintf(&stdoutBuf, "=== Job: %s [%s] (uses: %s) ===\n", jobName, matrixLabel, job.Uses)
 							}
 
-							_, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, depth)
+							bufRunner := &Runner{
+								stdin:        r.stdin,
+								stdout:       &stdoutBuf,
+								stderr:       &stderrBuf,
+								dir:          r.dir,
+								Quiet:        r.Quiet,
+								ActionsDir:   r.ActionsDir,
+								WorkflowsDir: r.WorkflowsDir,
+							}
+							_, err := bufRunner.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, depth)
 							if err != nil {
-								mu.Lock()
-								fmt.Fprintf(r.stderr, "job %q [%s]: %v\n", jobName, matrixLabel, err)
-								mu.Unlock()
+								fmt.Fprintf(&stderrBuf, "job %q [%s]: %v\n", jobName, matrixLabel, err)
 								matrixMu.Lock()
 								matrixFailed++
 								matrixMu.Unlock()
 							}
+							mu.Lock()
+							stdoutBuf.WriteTo(r.stdout)
+							stderrBuf.WriteTo(r.stderr)
+							mu.Unlock()
 						} else {
 							var stdoutBuf, stderrBuf bytes.Buffer
 							if !r.Quiet {

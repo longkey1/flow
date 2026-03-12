@@ -313,6 +313,10 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 		defaultShell = job.Defaults.Run.Shell
 	}
 
+	// Wrap stdout/stderr with indentation for step-level output
+	stepStdout := io.Writer(newIndentWriter(stdout, "  "))
+	stepStderr := io.Writer(newIndentWriter(stderr, "  "))
+
 	stepOutputs := make(map[string]map[string]string)
 	jobFailed := false
 	for _, step := range job.Steps {
@@ -325,14 +329,14 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 			}
 		}
 		if !r.Quiet {
-			fmt.Fprintf(stdout, "--- Step: %s ---\n", name)
+			fmt.Fprintf(stepStdout, "--- Step: %s ---\n", name)
 		}
 
 		if step.Uses != "" {
-			outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, jobOutputs, matrixValues, stdout, stderr, logFile, jobName, name)
+			outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, jobOutputs, matrixValues, stepStdout, stepStderr, logFile, jobName, name)
 			if err != nil {
 				jobFailed = true
-				fmt.Fprintf(stderr, "job %q, step %q: %v\n", jobName, name, err)
+				fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 				break
 			}
 			if step.Id != "" {
@@ -345,7 +349,7 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 		outputFile, err := os.CreateTemp("", "flow-output-*")
 		if err != nil {
 			jobFailed = true
-			fmt.Fprintf(stderr, "job %q, step %q: creating output file: %v\n", jobName, name, err)
+			fmt.Fprintf(stepStderr, "job %q, step %q: creating output file: %v\n", jobName, name, err)
 			break
 		}
 		outputPath := outputFile.Name()
@@ -368,14 +372,14 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 		}
 
 		// Determine stdout/stderr writers for the shell command
-		shellStdout, shellStderr := r.wrapWriters(stdout, stderr, logFile, jobName+"/"+name)
+		shellStdout, shellStderr := r.wrapWriters(stepStdout, stepStderr, logFile, jobName+"/"+name)
 
 		if err := runShell(command, r.dir, shell, r.stdin, shellStdout, shellStderr, env); err != nil {
 			flushPrefixedWriter(shellStdout)
 			flushPrefixedWriter(shellStderr)
 			os.Remove(outputPath)
 			jobFailed = true
-			fmt.Fprintf(stderr, "job %q, step %q: %v\n", jobName, name, err)
+			fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 			break
 		}
 
@@ -388,7 +392,7 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 			if err != nil {
 				os.Remove(outputPath)
 				jobFailed = true
-				fmt.Fprintf(stderr, "job %q, step %q: parsing output: %v\n", jobName, name, err)
+				fmt.Fprintf(stepStderr, "job %q, step %q: parsing output: %v\n", jobName, name, err)
 				break
 			}
 			stepOutputs[step.Id] = outputs
@@ -490,7 +494,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 
 		// Show sub-step name on screen when logging is enabled
 		if logFile != nil && !r.Quiet {
-			fmt.Fprintf(stdout, "  > %s\n", subStepName)
+			fmt.Fprintf(stdout, "> %s\n", subStepName)
 		}
 
 		// Create temp file for FLOW_OUTPUT
@@ -512,9 +516,11 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		}
 		env = append(env, "FLOW_OUTPUT="+outputPath)
 
-		// Determine stdout/stderr writers for the shell command
+		// Determine stdout/stderr writers for the shell command (indented within sub-step)
+		subStepStdout := io.Writer(newIndentWriter(stdout, "  "))
+		subStepStderr := io.Writer(newIndentWriter(stderr, "  "))
 		prefix := jobName + "/" + callerStepName + " > " + subStepName
-		shellStdout, shellStderr := r.wrapWriters(stdout, stderr, logFile, prefix)
+		shellStdout, shellStderr := r.wrapWriters(subStepStdout, subStepStderr, logFile, prefix)
 
 		if err := runShell(command, r.dir, "", r.stdin, shellStdout, shellStderr, env); err != nil {
 			flushPrefixedWriter(shellStdout)

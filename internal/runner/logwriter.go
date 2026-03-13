@@ -24,7 +24,7 @@ func NewLogFile(logsDir, workflowName string) (*LogFile, error) {
 	}
 
 	now := time.Now()
-	filename := fmt.Sprintf("%s-%s.log", workflowName, now.Format("20060102-150405"))
+	filename := fmt.Sprintf("%s-%s.log", now.Format("20060102-150405"), workflowName)
 	path := filepath.Join(logsDir, filename)
 
 	f, err := os.Create(path)

@@ -181,8 +181,8 @@ func TestLogFileCreate(t *testing.T) {
 	defer lf.Close()
 
 	path := lf.Path()
-	if !strings.Contains(path, "deploy-") {
-		t.Errorf("expected filename to contain 'deploy-', got: %s", path)
+	if !strings.Contains(path, "-deploy.log") {
+		t.Errorf("expected filename to contain '-deploy.log', got: %s", path)
 	}
 	if !strings.HasSuffix(path, ".log") {
 		t.Errorf("expected .log suffix, got: %s", path)

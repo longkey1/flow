@@ -309,11 +309,44 @@ jobs:
       target: ${{ matrix.target }}
 ```
 
+**Matrix outputs (aggregated as JSON arrays):**
+
+Matrix jobs can declare `outputs` just like regular jobs. Since multiple combinations produce multiple values, outputs are aggregated into a JSON array. Each entry contains the `matrix` values and the resolved `value`:
+
+```yaml
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: ["linux", "darwin"]
+    outputs:
+      result: ${{ steps.b.outputs.result }}
+    steps:
+      - id: b
+        run: echo "result=${{ matrix.os }}-ok" >> $FLOW_OUTPUT
+
+  deploy:
+    needs: build
+    steps:
+      - run: |
+          echo '${{ needs.build.outputs.result }}' | jq '.[].value'
+```
+
+The output `needs.build.outputs.result` will be a JSON array:
+
+```json
+[
+  {"matrix": {"os": "darwin"}, "value": "darwin-ok"},
+  {"matrix": {"os": "linux"}, "value": "linux-ok"}
+]
+```
+
+Entries are sorted by matrix label for deterministic ordering. If any matrix combination fails, the job is marked as failed and no outputs are propagated.
+
 Notes:
 - Matrix combinations run in parallel
-- Matrix job outputs are **not** propagated to downstream jobs
 - Output displays the matrix label: `=== Job: deploy [target=api] ===`
-- If any combination fails, the job is marked as failed
+- If any combination fails, the job is marked as failed and outputs are empty
 
 ### Shell Configuration
 

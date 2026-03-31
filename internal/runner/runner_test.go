@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1278,6 +1279,178 @@ func TestRunDefaultShellIsSh(t *testing.T) {
 	}
 	if !strings.Contains(stdout.String(), "default sh") {
 		t.Errorf("expected 'default sh' in output, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunMatrixOutputsAggregation(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"os": {Values: []string{"linux", "darwin"}},
+				},
+			},
+			Outputs: map[string]string{
+				"result": "${{ steps.b.outputs.result }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "b", Run: `echo "result=${{ matrix.os }}-ok" >> $FLOW_OUTPUT`},
+			},
+		},
+		"deploy": {
+			Needs: []string{"build"},
+			Steps: []workflow.Step{
+				{Run: `printf 'outputs=%s\n' '${{ needs.build.outputs.result }}'`},
+			},
+		},
+	}, []string{"build", "deploy"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+
+	// Extract the JSON from the deploy output
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "outputs=") {
+			jsonStr := strings.TrimPrefix(line, "outputs=")
+			var entries []struct {
+				Matrix map[string]string `json:"matrix"`
+				Value  string            `json:"value"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &entries); err != nil {
+				t.Fatalf("expected valid JSON array, got %q: %v", jsonStr, err)
+			}
+			if len(entries) != 2 {
+				t.Fatalf("expected 2 entries, got %d", len(entries))
+			}
+			// Results are sorted by matrix label, so darwin comes first
+			if entries[0].Matrix["os"] != "darwin" || entries[0].Value != "darwin-ok" {
+				t.Errorf("expected first entry darwin-ok, got %+v", entries[0])
+			}
+			if entries[1].Matrix["os"] != "linux" || entries[1].Value != "linux-ok" {
+				t.Errorf("expected second entry linux-ok, got %+v", entries[1])
+			}
+			return
+		}
+	}
+	t.Errorf("expected 'outputs=' line in output, got:\n%s", out)
+}
+
+func TestRunMatrixOutputsWithUses(t *testing.T) {
+	workflowsDir := t.TempDir()
+	writeWorkflow(t, workflowsDir, "build", `
+name: build
+inputs:
+  target:
+    required: true
+outputs:
+  result: ${{ jobs.run.outputs.result }}
+jobs:
+  run:
+    outputs:
+      result: "${{ steps.b.outputs.result }}"
+    steps:
+      - id: b
+        run: echo "result=${{ inputs.target }}-built" >> $FLOW_OUTPUT
+`)
+
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.WorkflowsDir = workflowsDir
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"target": {Values: []string{"api", "web"}},
+				},
+			},
+			Outputs: map[string]string{
+				"result": "",
+			},
+			Uses: "./build",
+			With: map[string]string{"target": "${{ matrix.target }}"},
+		},
+		"report": {
+			Needs: []string{"build"},
+			Steps: []workflow.Step{
+				{Run: `printf 'results=%s\n' '${{ needs.build.outputs.result }}'`},
+			},
+		},
+	}, []string{"build", "report"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := stdout.String()
+
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "results=") {
+			jsonStr := strings.TrimPrefix(line, "results=")
+			var entries []struct {
+				Matrix map[string]string `json:"matrix"`
+				Value  string            `json:"value"`
+			}
+			if err := json.Unmarshal([]byte(jsonStr), &entries); err != nil {
+				t.Fatalf("expected valid JSON array, got %q: %v", jsonStr, err)
+			}
+			if len(entries) != 2 {
+				t.Fatalf("expected 2 entries, got %d", len(entries))
+			}
+			// Sorted by matrix label: api < web
+			if entries[0].Value != "api-built" {
+				t.Errorf("expected first entry api-built, got %+v", entries[0])
+			}
+			if entries[1].Value != "web-built" {
+				t.Errorf("expected second entry web-built, got %+v", entries[1])
+			}
+			return
+		}
+	}
+	t.Errorf("expected 'results=' line in output, got:\n%s", out)
+}
+
+func TestRunMatrixOutputsFailedNoOutputs(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Strategy: &workflow.Strategy{
+				Matrix: map[string]workflow.MatrixParam{
+					"item": {Values: []string{"ok", "fail"}},
+				},
+			},
+			Outputs: map[string]string{
+				"result": "${{ steps.b.outputs.result }}",
+			},
+			Steps: []workflow.Step{
+				{Id: "b", Run: `if [ "${{ matrix.item }}" = "fail" ]; then exit 1; fi; echo "result=${{ matrix.item }}" >> $FLOW_OUTPUT`},
+			},
+		},
+		"report": {
+			Needs:  []string{"build"},
+			If:     "always()",
+			Steps: []workflow.Step{
+				{Run: `echo "result=${{ needs.build.outputs.result }}"`},
+			},
+		},
+	}, []string{"build", "report"})
+
+	err := r.Run(wf, nil)
+	if err == nil {
+		t.Fatal("expected error when matrix combination fails")
+	}
+	out := stdout.String()
+	// When matrix fails, outputs should be empty (not aggregated)
+	if strings.Contains(out, `"matrix"`) {
+		t.Errorf("expected no JSON matrix output when matrix fails, got:\n%s", out)
 	}
 }
 

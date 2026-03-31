@@ -198,9 +198,16 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 
 				combos := cartesianProduct(resolvedParams)
 
+				type matrixComboResult struct {
+					matrixValues map[string]string
+					stepOutputs  map[string]map[string]string // for direct steps
+					subOutputs   map[string]string            // for uses (workflow-level outputs)
+				}
+
 				var matrixWg sync.WaitGroup
 				var matrixFailed int32
 				var matrixMu sync.Mutex
+				var comboResults []matrixComboResult
 
 				for _, combo := range combos {
 					matrixWg.Add(1)
@@ -226,11 +233,18 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 								ActionsDir:   r.ActionsDir,
 								WorkflowsDir: r.WorkflowsDir,
 							}
-							_, err := bufRunner.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, depth, logFile)
+							res, err := bufRunner.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, depth, logFile)
 							if err != nil {
 								fmt.Fprintf(&stderrBuf, "job %q [%s]: %v\n", jobName, matrixLabel, err)
 								matrixMu.Lock()
 								matrixFailed++
+								matrixMu.Unlock()
+							} else {
+								matrixMu.Lock()
+								comboResults = append(comboResults, matrixComboResult{
+									matrixValues: matrixValues,
+									subOutputs:   res.outputs,
+								})
 								matrixMu.Unlock()
 							}
 							mu.Lock()
@@ -243,7 +257,16 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 								fmt.Fprintf(&stdoutBuf, "=== Job: %s [%s] ===\n", jobName, matrixLabel)
 							}
 
-							_, failed := r.runJobSteps(job, jobName, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf, logFile)
+							stepOutputs, failed := r.runJobSteps(job, jobName, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf, logFile)
+
+							if !failed {
+								matrixMu.Lock()
+								comboResults = append(comboResults, matrixComboResult{
+									matrixValues: matrixValues,
+									stepOutputs:  stepOutputs,
+								})
+								matrixMu.Unlock()
+							}
 
 							mu.Lock()
 							stdoutBuf.WriteTo(r.stdout)
@@ -267,6 +290,40 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 					failedJobs = append(failedJobs, jobName)
 				} else {
 					status[jobName] = "success"
+
+					// Aggregate matrix combo outputs as JSON arrays
+					if len(job.Outputs) > 0 {
+						// Sort combo results by matrix label for deterministic output
+						sort.Slice(comboResults, func(i, j int) bool {
+							return formatMatrixLabel(comboResults[i].matrixValues) < formatMatrixLabel(comboResults[j].matrixValues)
+						})
+
+						resolved := make(map[string]string, len(job.Outputs))
+						for outKey, outExpr := range job.Outputs {
+							type matrixOutputEntry struct {
+								Matrix map[string]string `json:"matrix"`
+								Value  string            `json:"value"`
+							}
+							entries := make([]matrixOutputEntry, 0, len(comboResults))
+							for _, cr := range comboResults {
+								var val string
+								if cr.subOutputs != nil {
+									// uses: resolve from sub-workflow outputs
+									val = cr.subOutputs[outKey]
+								} else {
+									// direct steps: resolve output expression with step outputs
+									val = expandExpressions(outExpr, cr.stepOutputs, resolvedInputs, nil, cr.matrixValues)
+								}
+								entries = append(entries, matrixOutputEntry{
+									Matrix: cr.matrixValues,
+									Value:  val,
+								})
+							}
+							jsonBytes, _ := json.Marshal(entries)
+							resolved[outKey] = string(jsonBytes)
+						}
+						jobOutputs[jobName] = resolved
+					}
 				}
 				mu.Unlock()
 				return

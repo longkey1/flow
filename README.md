@@ -511,6 +511,36 @@ jobs:
 
 Merge order: **workflow env** -> **job env** -> **step env** (later levels take precedence).
 
+## JSON Output
+
+Use `--format json` to get structured output instead of the default text format. When JSON format is enabled, all human-readable log headers are suppressed and a JSON object is written to stdout after the workflow completes:
+
+```bash
+flow run build --format json
+```
+
+```json
+{
+  "workflow": "build",
+  "status": "success",
+  "jobs": {
+    "compile": {
+      "status": "success",
+      "outputs": {
+        "version": "1.0.0"
+      }
+    }
+  },
+  "outputs": {
+    "version": "1.0.0"
+  }
+}
+```
+
+- `status` is `"success"` or `"failed"`
+- `jobs` contains per-job status and outputs
+- `outputs` contains workflow-level outputs (if declared)
+
 ## Configuration
 
 The `FLOW_ROOT` environment variable sets the root directory (default: `.flow`). Workflows are loaded from `$FLOW_ROOT/workflows/` and actions from `$FLOW_ROOT/actions/`.
@@ -522,6 +552,7 @@ flow list                                List available workflows (alias: ls)
 flow run <workflow>                      Run a workflow
 flow run <workflow> -i key=value         Pass input values (repeatable)
 flow run <workflow> --debug              Run with detailed output (overrides quiet)
+flow run <workflow> --format json        Output results as JSON
 flow describe <workflow>                 Show workflow details (inputs, jobs, steps)
 flow version                             Show version information
 flow version --short                     Show only the version number

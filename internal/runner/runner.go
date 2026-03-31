@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -22,6 +23,7 @@ type Runner struct {
 	dir          string
 	Quiet        bool
 	Debug        bool
+	Format       string
 	LogDir       string
 	LogMaxRuns   int
 	ActionsDir   string
@@ -33,6 +35,11 @@ func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
 }
 
 func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
+	jsonOutput := r.Format == "json"
+	if jsonOutput {
+		r.Quiet = true
+	}
+
 	var logFile *LogFile
 	if r.LogDir != "" {
 		var err error
@@ -43,7 +50,7 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 		defer logFile.Close()
 	}
 
-	_, err := r.run(wf, inputs, 0, logFile)
+	rr, err := r.run(wf, inputs, 0, logFile)
 
 	if logFile != nil {
 		if !r.Quiet {
@@ -54,10 +61,42 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 		}
 	}
 
+	if jsonOutput {
+		result := &Result{
+			Workflow: wf.Name,
+			Jobs:     make(map[string]*JobResult),
+		}
+		if rr != nil {
+			for jobName, s := range rr.status {
+				result.Jobs[jobName] = &JobResult{
+					Status:  s,
+					Outputs: rr.jobOutputs[jobName],
+				}
+			}
+			result.Outputs = rr.outputs
+		}
+		if err != nil {
+			result.Status = "failed"
+		} else {
+			result.Status = "success"
+		}
+		enc := json.NewEncoder(r.stdout)
+		enc.SetIndent("", "  ")
+		if encErr := enc.Encode(result); encErr != nil {
+			return encErr
+		}
+	}
+
 	return err
 }
 
-func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int, logFile *LogFile) (map[string]string, error) {
+type runResult struct {
+	outputs    map[string]string
+	status     map[string]string
+	jobOutputs map[string]map[string]string
+}
+
+func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int, logFile *LogFile) (*runResult, error) {
 	if depth > maxWorkflowDepth {
 		return nil, fmt.Errorf("maximum workflow depth %d exceeded", maxWorkflowDepth)
 	}
@@ -247,15 +286,15 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 				currentJobOutputs := copyJobOutputs(jobOutputs)
 				mu.Unlock()
 
-				subOutputs, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, nil, depth, logFile)
+				subResult, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, nil, depth, logFile)
 				mu.Lock()
 				if err != nil {
 					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
 					status[jobName] = "failed"
 					failedJobs = append(failedJobs, jobName)
 				} else {
-					if subOutputs != nil {
-						jobOutputs[jobName] = subOutputs
+					if subResult != nil && subResult.outputs != nil {
+						jobOutputs[jobName] = subResult.outputs
 					}
 					status[jobName] = "success"
 				}
@@ -303,8 +342,13 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 
 	wg.Wait()
 
+	res := &runResult{
+		status:     status,
+		jobOutputs: jobOutputs,
+	}
+
 	if len(failedJobs) > 0 {
-		return nil, fmt.Errorf("jobs failed: %v", failedJobs)
+		return res, fmt.Errorf("jobs failed: %v", failedJobs)
 	}
 
 	// Resolve workflow-level outputs
@@ -313,10 +357,10 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 		for k, v := range wf.Outputs {
 			resolved[k] = expandWorkflowOutputs(v, jobOutputs)
 		}
-		return resolved, nil
+		res.outputs = resolved
 	}
 
-	return nil, nil
+	return res, nil
 }
 
 // runJobSteps executes all steps in a job and returns step outputs and whether the job failed.
@@ -446,7 +490,7 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, wfEnv map[string]
 	return stepOutputs, jobFailed
 }
 
-func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, callerInputs map[string]string, callerJobOutputs map[string]map[string]string, matrixValues map[string]string, depth int, logFile *LogFile) (map[string]string, error) {
+func (r *Runner) runSubWorkflow(job workflow.Job, callerEnv map[string]string, callerInputs map[string]string, callerJobOutputs map[string]map[string]string, matrixValues map[string]string, depth int, logFile *LogFile) (*runResult, error) {
 	usesName := strings.TrimPrefix(job.Uses, "./")
 
 	subPath, err := workflow.Find(r.WorkflowsDir, usesName)

@@ -88,9 +88,12 @@ var runCmd = &cobra.Command{
 			logMaxRuns = n
 		}
 
+		format, _ := cmd.Flags().GetString("format")
+
 		r := runner.New(os.Stdin, cmd.OutOrStdout(), cmd.ErrOrStderr(), baseDir)
 		r.Quiet = wf.Quiet && !debug
 		r.Debug = debug
+		r.Format = format
 		r.LogDir = logsDir(baseDir)
 		r.LogMaxRuns = logMaxRuns
 		r.ActionsDir = actionsDir(baseDir)
@@ -102,5 +105,6 @@ var runCmd = &cobra.Command{
 func init() {
 	runCmd.Flags().Bool("debug", false, "Show detailed output regardless of workflow quiet setting")
 	runCmd.Flags().StringArrayP("input", "i", nil, "Input values in key=value format (can be specified multiple times)")
+	runCmd.Flags().String("format", "text", "Output format: text or json")
 	rootCmd.AddCommand(runCmd)
 }

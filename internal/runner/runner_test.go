@@ -1313,11 +1313,19 @@ func TestRunMatrixOutputsAggregation(t *testing.T) {
 	}
 	out := stdout.String()
 
-	// Extract the JSON from the deploy output
+	// Extract the JSON from the deploy output (skip header lines containing "---")
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "outputs=") {
-			jsonStr := strings.TrimPrefix(line, "outputs=")
+		if strings.Contains(line, "--- Step:") || strings.Contains(line, "=== Job:") {
+			continue
+		}
+		// Strip prefix (e.g. "[job > step] ") to get content
+		content := line
+		if bracketEnd := strings.Index(line, "] "); bracketEnd >= 0 {
+			content = line[bracketEnd+2:]
+		}
+		if idx := strings.Index(content, "outputs="); idx >= 0 {
+			jsonStr := content[idx+len("outputs="):]
 			var entries []struct {
 				Matrix map[string]string `json:"matrix"`
 				Value  string            `json:"value"`
@@ -1391,8 +1399,16 @@ jobs:
 
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "results=") {
-			jsonStr := strings.TrimPrefix(line, "results=")
+		if strings.Contains(line, "--- Step:") || strings.Contains(line, "=== Job:") {
+			continue
+		}
+		// Strip prefix (e.g. "[job > step] ") to get content
+		content := line
+		if bracketEnd := strings.Index(line, "] "); bracketEnd >= 0 {
+			content = line[bracketEnd+2:]
+		}
+		if idx := strings.Index(content, "results="); idx >= 0 {
+			jsonStr := content[idx+len("results="):]
 			var entries []struct {
 				Matrix map[string]string `json:"matrix"`
 				Value  string            `json:"value"`

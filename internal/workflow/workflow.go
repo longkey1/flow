@@ -63,6 +63,7 @@ type Workflow struct {
 	Env      map[string]string `yaml:"-"`
 	Inputs   map[string]Input  `yaml:"-"`
 	Outputs  map[string]string `yaml:"-"`
+	Defaults *Defaults         `yaml:"-"`
 	Jobs     map[string]Job    `yaml:"-"`
 	JobOrder []string          `yaml:"-"`
 }
@@ -93,6 +94,12 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 			if err := val.Decode(&w.Outputs); err != nil {
 				return fmt.Errorf("decoding workflow outputs: %w", err)
 			}
+		case "defaults":
+			var defaults Defaults
+			if err := val.Decode(&defaults); err != nil {
+				return fmt.Errorf("decoding workflow defaults: %w", err)
+			}
+			w.Defaults = &defaults
 		case "jobs":
 			w.Jobs = make(map[string]Job)
 			if val.Kind != yaml.MappingNode {
@@ -212,6 +219,11 @@ func (w *Workflow) Validate() error {
 	for name := range w.Inputs {
 		if !validInputNamePattern.MatchString(name) {
 			return fmt.Errorf("input %q has invalid name: must contain only alphanumeric characters, hyphens, and underscores", name)
+		}
+	}
+	if w.Defaults != nil {
+		if !validShells[w.Defaults.Run.Shell] {
+			return fmt.Errorf("workflow has invalid defaults.run.shell %q: must be sh or bash", w.Defaults.Run.Shell)
 		}
 	}
 	if len(w.Jobs) == 0 {

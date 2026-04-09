@@ -257,7 +257,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 								fmt.Fprintf(&stdoutBuf, "[%s %s] === Job: %s [%s] ===\n", jobName, matrixLabel, jobName, matrixLabel)
 							}
 
-							stepOutputs, failed := r.runJobSteps(job, jobName, jobName+" "+matrixLabel, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf, logFile)
+							stepOutputs, failed := r.runJobSteps(job, jobName, jobName+" "+matrixLabel, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf, logFile, wf.Defaults)
 
 							if !failed {
 								matrixMu.Lock()
@@ -370,7 +370,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 			currentJobOutputs := copyJobOutputs(jobOutputs)
 			mu.Unlock()
 
-			stepOutputs, jobFailed := r.runJobSteps(job, jobName, jobName, wf.Env, resolvedInputs, currentJobOutputs, nil, &stdoutBuf, &stderrBuf, logFile)
+			stepOutputs, jobFailed := r.runJobSteps(job, jobName, jobName, wf.Env, resolvedInputs, currentJobOutputs, nil, &stdoutBuf, &stderrBuf, logFile, wf.Defaults)
 
 			// Resolve job outputs using step outputs
 			if !jobFailed && len(job.Outputs) > 0 {
@@ -424,15 +424,18 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 // jobPrefix is the display prefix for the job (e.g. "deploy" or "deploy os=linux").
 func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string, wfEnv map[string]string,
 	resolvedInputs map[string]string, jobOutputs map[string]map[string]string,
-	matrixValues map[string]string, stdout, stderr io.Writer, logFile *LogFile) (map[string]map[string]string, bool) {
+	matrixValues map[string]string, stdout, stderr io.Writer, logFile *LogFile, wfDefaults *workflow.Defaults) (map[string]map[string]string, bool) {
 
 	// Merge workflow env → job env
 	jobEnv := mergeEnv(wfEnv, job.Env)
 
-	// Resolve default shell from job defaults
+	// Resolve default shell: job defaults > workflow defaults
 	var defaultShell string
 	if job.Defaults != nil {
 		defaultShell = job.Defaults.Run.Shell
+	}
+	if defaultShell == "" && wfDefaults != nil {
+		defaultShell = wfDefaults.Run.Shell
 	}
 
 	stepOutputs := make(map[string]map[string]string)
@@ -627,6 +630,12 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		return nil, fmt.Errorf("action %q: %w", usesName, err)
 	}
 
+	// Resolve default shell for action steps
+	defaultShell := ""
+	if act.Defaults != nil {
+		defaultShell = act.Defaults.Run.Shell
+	}
+
 	// Execute action steps
 	actionStepOutputs := make(map[string]map[string]string)
 	callingStepEnv := mergeEnv(jobEnv, step.Env)
@@ -671,7 +680,13 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		logPrefix := jobPrefix + "/" + callerStepName + " > " + subStepName
 		shellStdout, shellStderr := r.wrapWriters(subStepStdout, subStepStderr, logFile, logPrefix)
 
-		if err := runShell(command, r.dir, "", r.stdin, shellStdout, shellStderr, env); err != nil {
+		// Resolve shell: step.Shell > action defaults > "sh"
+		shell := actionStep.Shell
+		if shell == "" {
+			shell = defaultShell
+		}
+
+		if err := runShell(command, r.dir, shell, r.stdin, shellStdout, shellStderr, env); err != nil {
 			flushPrefixedWriter(shellStdout)
 			flushPrefixedWriter(shellStderr)
 			os.Remove(outputPath)

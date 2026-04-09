@@ -46,6 +46,9 @@ env:                        # Optional: workflow-level environment variables
   GLOBAL_VAR: value
 outputs:                    # Optional: workflow-level outputs (for reusable workflows)
   result: ${{ jobs.build.outputs.status }}
+defaults:                   # Optional: default settings for all jobs
+  run:
+    shell: bash             # Optional: default shell for all steps (sh or bash)
 jobs:
   job-name:
     if: always()           # Optional: conditional execution (success(), failure(), always(), comparisons)
@@ -352,18 +355,47 @@ Notes:
 
 By default, steps run via `sh -c`. You can change the shell at the job level (applying to all steps) or at the step level (overriding the job default). Valid values are `sh` and `bash`.
 
+**Workflow steps:**
+
 ```yaml
 name: shell-example
+defaults:
+  run:
+    shell: bash              # all jobs/steps in this workflow use bash
 jobs:
   build:
-    defaults:
-      run:
-        shell: bash          # all steps in this job use bash
     steps:
-      - run: echo "running in bash"
+      - run: echo "running in bash (from workflow defaults)"
       - run: echo "running in sh"
         shell: sh            # override for this step only
+  test:
+    defaults:
+      run:
+        shell: sh            # override workflow defaults for this job
+    steps:
+      - run: echo "running in sh (from job defaults)"
 ```
+
+Shell resolution order: **step shell** > **job defaults.run.shell** > **workflow defaults.run.shell** > **`sh`**
+
+**Action steps:**
+
+Actions also support `defaults.run.shell` and per-step `shell`:
+
+```yaml
+# .flow/actions/my-action/action.yaml
+name: my-action
+defaults:
+  run:
+    shell: bash              # all steps in this action use bash
+runs:
+  steps:
+    - run: echo "running in bash"
+    - run: echo "running in sh"
+      shell: sh              # override for this step only
+```
+
+Shell resolution order: **step shell** > **action defaults.run.shell** > **`sh`**
 
 ### Steps
 
@@ -469,6 +501,10 @@ outputs:
   greeting:
     description: "The generated greeting"
 
+defaults:                     # Optional: default settings for action steps
+  run:
+    shell: bash               # Optional: default shell for steps in this action (sh or bash)
+
 runs:
   steps:
     - id: greet
@@ -498,6 +534,8 @@ jobs:
 - A step cannot have both `run` and `uses`
 - `with` is only valid when `uses` is specified
 - Action steps can reference each other's outputs with `${{ steps.<id>.outputs.<key> }}`
+- Action steps can specify `shell: bash` or `shell: sh` per step, just like workflow steps
+- Actions support `defaults.run.shell` to set a default shell for all steps in the action
 - Environment variables are merged: workflow env -> job env -> calling step env -> action step env
 
 ### Workflow Outputs
@@ -604,6 +642,52 @@ my-project/
       deploy.yaml
       test.yaml
 ```
+
+## Differences from GitHub Actions
+
+flow is inspired by GitHub Actions and shares much of the same YAML syntax, but there are notable differences.
+
+### Execution Model
+
+| | GitHub Actions | flow |
+|-|---------------|------|
+| Execution environment | Cloud-hosted VMs/containers | Local machine |
+| Trigger | Events (`on: push`, `on: pull_request`, etc.) | CLI invocation (`flow run <workflow>`) |
+| Runner selection | `runs-on: ubuntu-latest` | Not applicable (always local) |
+| Services/containers | Supported (`services:`, `container:`) | Not supported |
+| Interactive input | Not supported | Supported (stdin is connected to terminal) |
+
+### Shell
+
+| | GitHub Actions | flow |
+|-|---------------|------|
+| Default shell | `bash` (Linux/macOS), `pwsh` (Windows) | `sh` |
+| Available shells | `bash`, `sh`, `pwsh`, `cmd`, `powershell`, `python` | `sh`, `bash` |
+| Composite action step `shell` | **Required** | Optional (defaults to `sh`) |
+| Action-level `defaults.run.shell` | Not supported | Supported |
+
+### Actions
+
+| | GitHub Actions | flow |
+|-|---------------|------|
+| Remote actions | Supported (`uses: actions/checkout@v4`) | Not supported (local only) |
+| Action location | Local, GitHub Marketplace, any repo | `.flow/actions/<name>/action.yaml` |
+| `runs.using` field | Required (`composite`, `node20`, `docker`) | Not used (always composite) |
+| Action `defaults.run.shell` | Not supported | Supported |
+
+### Step Outputs
+
+| | GitHub Actions | flow |
+|-|---------------|------|
+| Output file | `$GITHUB_OUTPUT` | `$FLOW_OUTPUT` |
+| Delimiter syntax | `KEY<<DELIMITER` | `KEY<<DELIMITER` (same) |
+
+### Other Differences
+
+- **Matrix outputs**: In flow, matrix job outputs are aggregated as a JSON array with `{"matrix": {...}, "value": "..."}` entries. GitHub Actions does not aggregate matrix outputs.
+- **Job output buffering**: flow buffers each parallel job's stdout/stderr and flushes it as a unit to prevent interleaved output. GitHub Actions handles this via its log UI.
+- **`quiet` option**: flow supports `quiet: true` at the workflow level to suppress log headers. GitHub Actions has no equivalent.
+- **JSON output**: `flow run --format json` outputs structured results. GitHub Actions provides this through its API, not CLI.
 
 ## License
 

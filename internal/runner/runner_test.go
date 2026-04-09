@@ -42,7 +42,7 @@ func TestRunNoDependencies(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "=== Job: a ===") || !strings.Contains(out, "=== Job: b ===") {
+	if !strings.Contains(out, "Job: a") || !strings.Contains(out, "Job: b") {
 		t.Errorf("expected both jobs to run, got:\n%s", out)
 	}
 }
@@ -61,9 +61,9 @@ func TestRunWithDependenciesAllSuccess(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	out := stdout.String()
-	buildIdx := strings.Index(out, "=== Job: build ===")
-	testIdx := strings.Index(out, "=== Job: test ===")
-	deployIdx := strings.Index(out, "=== Job: deploy ===")
+	buildIdx := strings.Index(out, "Job: build")
+	testIdx := strings.Index(out, "Job: test")
+	deployIdx := strings.Index(out, "Job: deploy")
 	if buildIdx >= testIdx || testIdx >= deployIdx {
 		t.Errorf("expected build < test < deploy order, got:\n%s", out)
 	}
@@ -103,7 +103,7 @@ func TestRunIndependentJobsRunDespiteFailure(t *testing.T) {
 		t.Fatal("expected error when job fails")
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "=== Job: independent ===") {
+	if !strings.Contains(out, "Job: independent") {
 		t.Errorf("expected independent job to run, got:\n%s", out)
 	}
 	if !strings.Contains(out, "(skipped)") {
@@ -326,10 +326,10 @@ func TestRunTransitiveSkip(t *testing.T) {
 		t.Fatal("expected error when job fails")
 	}
 	out := stdout.String()
-	if !strings.Contains(out, "=== Job: b (skipped) ===") {
+	if !strings.Contains(out, "Job: b (skipped)") {
 		t.Errorf("expected b to be skipped, got:\n%s", out)
 	}
-	if !strings.Contains(out, "=== Job: c (skipped) ===") {
+	if !strings.Contains(out, "Job: c (skipped)") {
 		t.Errorf("expected c to be skipped, got:\n%s", out)
 	}
 }
@@ -766,10 +766,10 @@ func TestRunParallelFailedJobSkipsDependents(t *testing.T) {
 		t.Errorf("expected lint to run, got:\n%s", out)
 	}
 	// test and deploy should be skipped
-	if !strings.Contains(out, "=== Job: test (skipped) ===") {
+	if !strings.Contains(out, "Job: test (skipped)") {
 		t.Errorf("expected test to be skipped, got:\n%s", out)
 	}
-	if !strings.Contains(out, "=== Job: deploy (skipped) ===") {
+	if !strings.Contains(out, "Job: deploy (skipped)") {
 		t.Errorf("expected deploy to be skipped, got:\n%s", out)
 	}
 }
@@ -1316,7 +1316,7 @@ func TestRunMatrixOutputsAggregation(t *testing.T) {
 	// Extract the JSON from the deploy output (skip header lines containing "---")
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "--- Step:") || strings.Contains(line, "=== Job:") {
+		if strings.Contains(line, "Step:") || strings.Contains(line, "Job:") {
 			continue
 		}
 		// Strip prefix (e.g. "[job > step] ") to get content
@@ -1399,7 +1399,7 @@ jobs:
 
 	for _, line := range strings.Split(out, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.Contains(line, "--- Step:") || strings.Contains(line, "=== Job:") {
+		if strings.Contains(line, "Step:") || strings.Contains(line, "Job:") {
 			continue
 		}
 		// Strip prefix (e.g. "[job > step] ") to get content
@@ -1606,10 +1606,10 @@ func TestRunStepIfSkippedDisplay(t *testing.T) {
 
 	r.Run(wf, nil)
 	out := stdout.String()
-	if !strings.Contains(out, "--- Step: Normal Step (skipped) ---") {
+	if !strings.Contains(out, "Step: Normal Step (skipped)") {
 		t.Errorf("expected Normal Step to be skipped, got:\n%s", out)
 	}
-	if !strings.Contains(out, "--- Step: Cleanup ---") {
+	if !strings.Contains(out, "Step: Cleanup") {
 		t.Errorf("expected Cleanup to show as running, got:\n%s", out)
 	}
 }
@@ -1631,7 +1631,7 @@ func TestRunJobIfAlways(t *testing.T) {
 	if !strings.Contains(out, "cleanup ran") {
 		t.Errorf("expected cleanup job to run with always(), got:\n%s", out)
 	}
-	if strings.Contains(out, "=== Job: cleanup (skipped) ===") {
+	if strings.Contains(out, "Job: cleanup (skipped)") {
 		t.Errorf("cleanup should not be skipped, got:\n%s", out)
 	}
 }

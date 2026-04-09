@@ -166,7 +166,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 				mu.Unlock()
 				if !r.Quiet {
 					var buf bytes.Buffer
-					fmt.Fprintf(&buf, "[%s] === Job: %s (skipped) ===\n", jobName, jobName)
+					fmt.Fprintf(&buf, "[%s] Job: %s (skipped)\n", jobName, jobName)
 					mu.Lock()
 					buf.WriteTo(r.stdout)
 					mu.Unlock()
@@ -230,7 +230,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 						if job.Uses != "" {
 							var stdoutBuf, stderrBuf bytes.Buffer
 							if !r.Quiet {
-								fmt.Fprintf(&stdoutBuf, "[%s %s] === Job: %s [%s] (uses: %s) ===\n", jobName, matrixLabel, jobName, matrixLabel, job.Uses)
+								fmt.Fprintf(&stdoutBuf, "[%s %s] Job: %s [%s] (uses: %s)\n", jobName, matrixLabel, jobName, matrixLabel, job.Uses)
 							}
 
 							bufRunner := &Runner{
@@ -265,7 +265,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 						} else {
 							var stdoutBuf, stderrBuf bytes.Buffer
 							if !r.Quiet {
-								fmt.Fprintf(&stdoutBuf, "[%s %s] === Job: %s [%s] ===\n", jobName, matrixLabel, jobName, matrixLabel)
+								fmt.Fprintf(&stdoutBuf, "[%s %s] Job: %s [%s]\n", jobName, matrixLabel, jobName, matrixLabel)
 							}
 
 							stepOutputs, failed := r.runJobSteps(job, jobName, jobName+" "+matrixLabel, wf.Env, resolvedInputs, currentJobOutputs, matrixValues, &stdoutBuf, &stderrBuf, logFile, wf.Defaults)
@@ -344,7 +344,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 			if job.Uses != "" {
 				if !r.Quiet {
 					var buf bytes.Buffer
-					fmt.Fprintf(&buf, "[%s] === Job: %s (uses: %s) ===\n", jobName, jobName, job.Uses)
+					fmt.Fprintf(&buf, "[%s] Job: %s (uses: %s)\n", jobName, jobName, job.Uses)
 					mu.Lock()
 					buf.WriteTo(r.stdout)
 					mu.Unlock()
@@ -374,7 +374,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 			var stdoutBuf, stderrBuf bytes.Buffer
 
 			if !r.Quiet {
-				fmt.Fprintf(&stdoutBuf, "[%s] === Job: %s ===\n", jobName, jobName)
+				fmt.Fprintf(&stdoutBuf, "[%s] Job: %s\n", jobName, jobName)
 			}
 
 			mu.Lock()
@@ -476,20 +476,20 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string,
 			}
 			if !shouldRun {
 				if !r.Quiet {
-					fmt.Fprintf(stepStdout, "--- Step: %s (skipped) ---\n", name)
+					fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
 				}
 				continue
 			}
 		} else if jobFailed {
 			// Default behavior: skip when previous steps failed (same as success())
 			if !r.Quiet {
-				fmt.Fprintf(stepStdout, "--- Step: %s (skipped) ---\n", name)
+				fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
 			}
 			continue
 		}
 
 		if !r.Quiet {
-			fmt.Fprintf(stepStdout, "--- Step: %s ---\n", name)
+			fmt.Fprintf(stepStdout, "Step: %s\n", name)
 		}
 
 		if step.Uses != "" {

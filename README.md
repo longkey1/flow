@@ -365,7 +365,7 @@ This runs at most 2 combinations at a time. Useful for avoiding resource content
 
 Notes:
 - Matrix combinations run in parallel by default (use `max-parallel` to limit)
-- Output displays the matrix label: `=== Job: deploy [target=api] ===`
+- Output displays the matrix label: `Job: deploy [target=api]`
 - If any combination fails, the job is marked as failed and outputs are empty
 
 ### Shell Configuration

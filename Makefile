@@ -6,7 +6,11 @@ export PRODUCT_NAME=$(shell cat .product_name 2>/dev/null || echo "unknown")
 .PHONY: build
 build: ## Build the binary to ./bin/
 	@mkdir -p bin
-	go build -o bin/$(PRODUCT_NAME)
+	go build -ldflags "\
+		-X github.com/longkey1/flow/internal/version.Version=$$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+		-X github.com/longkey1/flow/internal/version.CommitSHA=$$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+		-X github.com/longkey1/flow/internal/version.BuildTime=$$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+		-o bin/$(PRODUCT_NAME)
 
 .PHONY: test
 test: ## Run tests

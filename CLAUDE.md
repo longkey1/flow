@@ -8,25 +8,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Environment
 
-Go toolchain is managed via direnv. All commands must be run through `direnv exec .`:
-
-```bash
-direnv exec . <command>     # Run any command with direnv environment
-```
+Go toolchain is managed via direnv (automatically loaded in the shell).
 
 ## Build & Development Commands
 
 ```bash
-direnv exec . make build      # Build binary to ./bin/flow
-direnv exec . make test       # Run all tests (go test ./...)
-direnv exec . make fmt        # Format code (go fmt ./...)
-direnv exec . make vet        # Vet code (go vet ./...)
-direnv exec . make tidy       # Tidy dependencies (go mod tidy)
-direnv exec . make clean      # Remove build artifacts
-direnv exec . make tools      # Install goreleaser
+make build      # Build binary to ./bin/flow
+make test       # Run all tests (go test ./...)
+make fmt        # Format code (go fmt ./...)
+make vet        # Vet code (go vet ./...)
+make tidy       # Tidy dependencies (go mod tidy)
+make clean      # Remove build artifacts
+make tools      # Install goreleaser
 ```
 
-Single test: `direnv exec . go test -run TestName ./path/to/package`
+Single test: `go test -run TestName ./path/to/package`
 
 ## Release
 

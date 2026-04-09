@@ -941,3 +941,86 @@ jobs:
 		t.Errorf("expected with target expression, got %q", job.With["target"])
 	}
 }
+
+func TestParseMaxParallel(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  deploy:
+    strategy:
+      max-parallel: 2
+      matrix:
+        target: ["api", "web", "worker"]
+    steps:
+      - run: echo "${{ matrix.target }}"
+`)
+	job := wf.Jobs["deploy"]
+	if job.Strategy == nil {
+		t.Fatal("expected strategy to be set")
+	}
+	if job.Strategy.MaxParallel != 2 {
+		t.Errorf("expected max-parallel 2, got %d", job.Strategy.MaxParallel)
+	}
+	param := job.Strategy.Matrix["target"]
+	if len(param.Values) != 3 {
+		t.Errorf("expected 3 values, got %d", len(param.Values))
+	}
+}
+
+func TestParseMaxParallelNotSet(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  test:
+    strategy:
+      matrix:
+        node: ["16", "18"]
+    steps:
+      - run: echo test
+`)
+	job := wf.Jobs["test"]
+	if job.Strategy == nil {
+		t.Fatal("expected strategy to be set")
+	}
+	if job.Strategy.MaxParallel != 0 {
+		t.Errorf("expected max-parallel 0 (not set), got %d", job.Strategy.MaxParallel)
+	}
+}
+
+func TestParseMaxParallelInvalid(t *testing.T) {
+	yamlContent := `
+name: test
+jobs:
+  test:
+    strategy:
+      max-parallel: 0
+      matrix:
+        node: ["16"]
+    steps:
+      - run: echo test
+`
+	var wf Workflow
+	err := yaml.Unmarshal([]byte(yamlContent), &wf)
+	if err == nil {
+		t.Fatal("expected error for max-parallel: 0")
+	}
+}
+
+func TestParseMaxParallelNegative(t *testing.T) {
+	yamlContent := `
+name: test
+jobs:
+  test:
+    strategy:
+      max-parallel: -1
+      matrix:
+        node: ["16"]
+    steps:
+      - run: echo test
+`
+	var wf Workflow
+	err := yaml.Unmarshal([]byte(yamlContent), &wf)
+	if err == nil {
+		t.Fatal("expected error for negative max-parallel")
+	}
+}

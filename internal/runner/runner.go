@@ -209,10 +209,21 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 				var matrixMu sync.Mutex
 				var comboResults []matrixComboResult
 
+				var sem chan struct{}
+				if job.Strategy.MaxParallel > 0 {
+					sem = make(chan struct{}, job.Strategy.MaxParallel)
+				}
+
 				for _, combo := range combos {
 					matrixWg.Add(1)
+					if sem != nil {
+						sem <- struct{}{}
+					}
 					go func(matrixValues map[string]string) {
 						defer matrixWg.Done()
+						if sem != nil {
+							defer func() { <-sem }()
+						}
 
 						matrixLabel := formatMatrixLabel(matrixValues)
 

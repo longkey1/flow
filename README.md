@@ -346,8 +346,25 @@ The output `needs.build.outputs.result` will be a JSON array:
 
 Entries are sorted by matrix label for deterministic ordering. If any matrix combination fails, the job is marked as failed and no outputs are propagated.
 
+**Limiting parallel execution (`max-parallel`):**
+
+By default, all matrix combinations run in parallel. Use `strategy.max-parallel` to limit the number of concurrent executions:
+
+```yaml
+jobs:
+  deploy:
+    strategy:
+      max-parallel: 2
+      matrix:
+        target: ["api", "web", "worker", "batch"]
+    steps:
+      - run: deploy ${{ matrix.target }}
+```
+
+This runs at most 2 combinations at a time. Useful for avoiding resource contention (e.g., API rate limits, shared infrastructure).
+
 Notes:
-- Matrix combinations run in parallel
+- Matrix combinations run in parallel by default (use `max-parallel` to limit)
 - Output displays the matrix label: `=== Job: deploy [target=api] ===`
 - If any combination fails, the job is marked as failed and outputs are empty
 

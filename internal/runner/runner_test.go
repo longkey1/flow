@@ -1735,3 +1735,34 @@ func TestRunBackwardCompatibilityNoIf(t *testing.T) {
 		t.Errorf("third step should not produce output when skipped, got:\n%s", out)
 	}
 }
+
+func TestRunMatrixMaxParallel(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.Quiet = true
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"test": {
+			Strategy: &workflow.Strategy{
+				MaxParallel: 1,
+				Matrix: map[string]workflow.MatrixParam{
+					"item": {Values: []string{"a", "b", "c"}},
+				},
+			},
+			Steps: []workflow.Step{
+				{Run: "sleep 0.3 && echo done"},
+			},
+		},
+	}, []string{"test"})
+
+	start := time.Now()
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	// max-parallel=1: 3 items at 0.3s each → sequential ≈0.9s
+	if elapsed < 800*time.Millisecond {
+		t.Errorf("expected sequential execution with max-parallel=1 (>0.8s), took %v", elapsed)
+	}
+}

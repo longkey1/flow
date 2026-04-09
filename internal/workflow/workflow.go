@@ -42,7 +42,8 @@ type MatrixParam struct {
 }
 
 type Strategy struct {
-	Matrix map[string]MatrixParam
+	Matrix      map[string]MatrixParam
+	MaxParallel int
 }
 
 type Job struct {
@@ -173,6 +174,7 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 							if strategyNode.Kind != yaml.MappingNode {
 								return fmt.Errorf("job %q: strategy must be a mapping", jobKey.Value)
 							}
+							strategy := &Strategy{}
 							for s := 0; s < len(strategyNode.Content)-1; s += 2 {
 								if strategyNode.Content[s].Value == "matrix" {
 									matrixNode := strategyNode.Content[s+1]
@@ -196,9 +198,20 @@ func (w *Workflow) UnmarshalYAML(value *yaml.Node) error {
 											return fmt.Errorf("job %q: matrix param %q must be a list or expression string", jobKey.Value, paramKey)
 										}
 									}
-									job.Strategy = &Strategy{Matrix: matrix}
+									strategy.Matrix = matrix
+								}
+								if strategyNode.Content[s].Value == "max-parallel" {
+									var maxParallel int
+									if err := strategyNode.Content[s+1].Decode(&maxParallel); err != nil {
+										return fmt.Errorf("job %q: strategy.max-parallel must be a positive integer", jobKey.Value)
+									}
+									if maxParallel < 1 {
+										return fmt.Errorf("job %q: strategy.max-parallel must be a positive integer", jobKey.Value)
+									}
+									strategy.MaxParallel = maxParallel
 								}
 							}
+							job.Strategy = strategy
 						}
 					}
 				}

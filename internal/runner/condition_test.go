@@ -304,3 +304,62 @@ func TestConditionBoolLiterals(t *testing.T) {
 		t.Error("expected false literal to be falsy")
 	}
 }
+
+func TestConditionParseErrors(t *testing.T) {
+	tests := []struct {
+		name      string
+		condition string
+	}{
+		{"unterminated string literal", "'unterminated"},
+		{"missing closing parenthesis", "(true"},
+		{"unterminated function call", "success("},
+		{"trailing characters", "true )"},
+		{"error in or right operand", "true || 'x"},
+		{"error in and right operand", "true && 'x"},
+		{"error in comparison right operand", "'a' == 'x"},
+		{"error after not", "!'x"},
+		{"error inside parentheses", "('x"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := evaluateCondition(tt.condition, false, nil, nil, nil, nil); err == nil {
+				t.Errorf("evaluateCondition(%q): expected error, got nil", tt.condition)
+			}
+		})
+	}
+}
+
+func TestConditionNotAtEndOfInput(t *testing.T) {
+	// "!" with nothing after it negates the empty string, which is falsy.
+	result, err := evaluateCondition("!", false, nil, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result {
+		t.Error("expected ! of empty operand to be true")
+	}
+}
+
+func TestConditionBoolComparison(t *testing.T) {
+	tests := []struct {
+		condition string
+		jobFailed bool
+		expected  bool
+	}{
+		{"success() == 'true'", false, true},
+		{"success() == 'false'", false, false},
+		{"failure() == 'false'", false, true},
+		{"failure() != 'true'", false, true},
+	}
+
+	for _, tt := range tests {
+		result, err := evaluateCondition(tt.condition, tt.jobFailed, nil, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("condition %q: %v", tt.condition, err)
+		}
+		if result != tt.expected {
+			t.Errorf("condition %q: expected %v, got %v", tt.condition, tt.expected, result)
+		}
+	}
+}

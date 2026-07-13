@@ -304,3 +304,59 @@ func TestRotateLogsMissingDir(t *testing.T) {
 		t.Errorf("expected no error for missing directory, got: %v", err)
 	}
 }
+
+func TestNewLogFileMkdirError(t *testing.T) {
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "file")
+	if err := os.WriteFile(blocker, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// A path component that is a regular file makes MkdirAll fail.
+	_, err := NewLogFile(filepath.Join(blocker, "logs"), "wf")
+	if err == nil {
+		t.Fatal("expected error creating logs directory")
+	}
+	if !strings.Contains(err.Error(), "creating logs directory") {
+		t.Errorf("expected 'creating logs directory' error, got: %v", err)
+	}
+}
+
+func TestNewLogFileCreateError(t *testing.T) {
+	dir := t.TempDir()
+
+	// A workflow name with a path separator points at a nonexistent subdirectory.
+	_, err := NewLogFile(dir, "bad/name")
+	if err == nil {
+		t.Fatal("expected error creating log file")
+	}
+	if !strings.Contains(err.Error(), "creating log file") {
+		t.Errorf("expected 'creating log file' error, got: %v", err)
+	}
+}
+
+func TestPrefixedWriterWriteAfterClose(t *testing.T) {
+	dir := t.TempDir()
+	lf, err := NewLogFile(dir, "wf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lf.Close()
+
+	pw := NewPrefixedWriter(lf, "job")
+	if _, err := pw.Write([]byte("line\n")); err == nil {
+		t.Fatal("expected error writing to closed log file")
+	}
+}
+
+func TestRotateLogsReadDirError(t *testing.T) {
+	dir := t.TempDir()
+	notDir := filepath.Join(dir, "file")
+	if err := os.WriteFile(notDir, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RotateLogs(notDir, 5); err == nil {
+		t.Fatal("expected error when logs dir is a regular file")
+	}
+}

@@ -1766,3 +1766,141 @@ func TestRunMatrixMaxParallel(t *testing.T) {
 		t.Errorf("expected sequential execution with max-parallel=1 (>0.8s), took %v", elapsed)
 	}
 }
+
+func TestRunJSONFormat(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.Format = "json"
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {
+			Steps:   []workflow.Step{{Id: "step1", Run: `echo "version=1.2.3" >> "$FLOW_OUTPUT"`}},
+			Outputs: map[string]string{"version": "${{ steps.step1.outputs.version }}"},
+		},
+	}, []string{"build"})
+	wf.Outputs = map[string]string{"version": "${{ jobs.build.outputs.version }}"}
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var result Result
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected valid JSON output, got error %v:\n%s", err, stdout.String())
+	}
+	if result.Workflow != "test" {
+		t.Errorf("expected workflow 'test', got %q", result.Workflow)
+	}
+	if result.Status != "success" {
+		t.Errorf("expected status 'success', got %q", result.Status)
+	}
+	job, ok := result.Jobs["build"]
+	if !ok {
+		t.Fatalf("expected job 'build' in result, got %v", result.Jobs)
+	}
+	if job.Status != "success" {
+		t.Errorf("expected job status 'success', got %q", job.Status)
+	}
+	if result.Outputs["version"] != "1.2.3" {
+		t.Errorf("expected workflow output version=1.2.3, got %v", result.Outputs)
+	}
+}
+
+func TestRunJSONFormatFailure(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.Format = "json"
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{{Run: "exit 1"}}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err == nil {
+		t.Fatal("expected error for failed workflow")
+	}
+
+	var result Result
+	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+		t.Fatalf("expected valid JSON output, got error %v:\n%s", err, stdout.String())
+	}
+	if result.Status != "failed" {
+		t.Errorf("expected status 'failed', got %q", result.Status)
+	}
+	if job := result.Jobs["build"]; job == nil || job.Status != "failed" {
+		t.Errorf("expected job 'build' failed, got %v", result.Jobs)
+	}
+}
+
+func TestRunWithLogFile(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	logDir := filepath.Join(t.TempDir(), "logs")
+	r.LogDir = logDir
+	r.LogMaxRuns = 5
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{{Run: "echo hello-from-log"}}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(stdout.String(), "Log: ") {
+		t.Errorf("expected log path in output, got:\n%s", stdout.String())
+	}
+
+	entries, err := os.ReadDir(logDir)
+	if err != nil {
+		t.Fatalf("expected logs directory to exist: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 log file, got %d", len(entries))
+	}
+	data, err := os.ReadFile(filepath.Join(logDir, entries[0].Name()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "hello-from-log") {
+		t.Errorf("expected log file to contain command output, got:\n%s", string(data))
+	}
+}
+
+func TestRunWithLogFileDebug(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+	r.LogDir = filepath.Join(t.TempDir(), "logs")
+	r.LogMaxRuns = 5
+	r.Debug = true
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{{Run: "echo debug-output"}}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// In debug mode command output goes to both stdout and the log file.
+	if !strings.Contains(stdout.String(), "debug-output") {
+		t.Errorf("expected command output on stdout in debug mode, got:\n%s", stdout.String())
+	}
+}
+
+func TestRunLogFileCreateError(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	r := New(nil, &stdout, &stderr, "")
+
+	dir := t.TempDir()
+	blocker := filepath.Join(dir, "file")
+	if err := os.WriteFile(blocker, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r.LogDir = filepath.Join(blocker, "logs")
+
+	wf := makeWorkflow(t, map[string]workflow.Job{
+		"build": {Steps: []workflow.Step{{Run: "echo hello"}}},
+	}, []string{"build"})
+
+	if err := r.Run(wf, nil); err == nil {
+		t.Fatal("expected error when log directory cannot be created")
+	}
+}

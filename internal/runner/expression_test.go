@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/longkey1/flow/internal/workflow"
@@ -379,5 +380,16 @@ func TestCartesianProductMultipleKeys(t *testing.T) {
 		if combo["node"] != expected[i]["node"] || combo["os"] != expected[i]["os"] {
 			t.Errorf("combination %d: expected %v, got %v", i, expected[i], combo)
 		}
+	}
+}
+
+func TestResolveMatrixParamInvalidExpression(t *testing.T) {
+	param := workflow.MatrixParam{Expression: "${{ inputs.list }}"}
+	_, err := resolveMatrixParam(param, map[string]string{"list": `["a"]`}, nil)
+	if err == nil {
+		t.Fatal("expected error for non-fromJson expression")
+	}
+	if !strings.Contains(err.Error(), "fromJson") {
+		t.Errorf("expected 'fromJson' error, got: %v", err)
 	}
 }

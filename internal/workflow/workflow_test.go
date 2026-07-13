@@ -1024,3 +1024,363 @@ jobs:
 		t.Fatal("expected error for negative max-parallel")
 	}
 }
+
+func TestParseQuiet(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+quiet: true
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if !wf.Quiet {
+		t.Error("expected quiet to be true")
+	}
+}
+
+func TestParseWorkflowDefaults(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+defaults:
+  run:
+    shell: bash
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	if wf.Defaults == nil {
+		t.Fatal("expected defaults to be set")
+	}
+	if wf.Defaults.Run.Shell != "bash" {
+		t.Errorf("expected shell 'bash', got %q", wf.Defaults.Run.Shell)
+	}
+}
+
+func TestUnmarshalErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		errPart string
+	}{
+		{
+			name: "env not a mapping",
+			input: `
+name: test
+env: [a, b]
+jobs:
+  build:
+    steps:
+      - run: echo build
+`,
+			errPart: "decoding workflow env",
+		},
+		{
+			name: "inputs not a mapping",
+			input: `
+name: test
+inputs: [a]
+jobs:
+  build:
+    steps:
+      - run: echo build
+`,
+			errPart: "decoding workflow inputs",
+		},
+		{
+			name: "outputs not a mapping",
+			input: `
+name: test
+outputs: [a]
+jobs:
+  build:
+    steps:
+      - run: echo build
+`,
+			errPart: "decoding workflow outputs",
+		},
+		{
+			name: "defaults not a mapping",
+			input: `
+name: test
+defaults: [a]
+jobs:
+  build:
+    steps:
+      - run: echo build
+`,
+			errPart: "decoding workflow defaults",
+		},
+		{
+			name: "jobs not a mapping",
+			input: `
+name: test
+jobs: [a]
+`,
+			errPart: "jobs must be a mapping",
+		},
+		{
+			name: "job not a mapping",
+			input: `
+name: test
+jobs:
+  build: [a]
+`,
+			errPart: `decoding job "build"`,
+		},
+		{
+			name: "needs list with non-scalar element",
+			input: `
+name: test
+jobs:
+  build:
+    needs: [{a: b}]
+    steps:
+      - run: echo build
+`,
+			errPart: `decoding needs for job "build"`,
+		},
+		{
+			name: "needs is a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    needs: {a: b}
+    steps:
+      - run: echo build
+`,
+			errPart: "needs must be a string or list of strings",
+		},
+		{
+			name: "job outputs not a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    outputs: [a]
+    steps:
+      - run: echo build
+`,
+			errPart: "outputs must be a mapping",
+		},
+		{
+			name: "job outputs with non-scalar value",
+			input: `
+name: test
+jobs:
+  build:
+    outputs:
+      key: [a]
+    steps:
+      - run: echo build
+`,
+			errPart: `decoding outputs for job "build"`,
+		},
+		{
+			name: "with not a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    uses: other
+    with: value
+`,
+			errPart: "with must be a mapping",
+		},
+		{
+			name: "with has non-scalar value",
+			input: `
+name: test
+jobs:
+  build:
+    uses: other
+    with:
+      key: [a]
+`,
+			errPart: `decoding with for job "build"`,
+		},
+		{
+			name: "job defaults not a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    defaults: [a]
+    steps:
+      - run: echo build
+`,
+			errPart: `decoding defaults for job "build"`,
+		},
+		{
+			name: "strategy not a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    strategy: value
+    steps:
+      - run: echo build
+`,
+			errPart: "strategy must be a mapping",
+		},
+		{
+			name: "matrix not a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    strategy:
+      matrix: value
+    steps:
+      - run: echo build
+`,
+			errPart: "strategy.matrix must be a mapping",
+		},
+		{
+			name: "matrix param list with non-scalar element",
+			input: `
+name: test
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [{a: b}]
+    steps:
+      - run: echo build
+`,
+			errPart: `decoding matrix param "os"`,
+		},
+		{
+			name: "matrix param is a mapping",
+			input: `
+name: test
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: {a: b}
+    steps:
+      - run: echo build
+`,
+			errPart: "must be a list or expression string",
+		},
+		{
+			name: "max-parallel not an integer",
+			input: `
+name: test
+jobs:
+  build:
+    strategy:
+      max-parallel: abc
+      matrix:
+        os: [linux]
+    steps:
+      - run: echo build
+`,
+			errPart: "max-parallel must be a positive integer",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var wf Workflow
+			err := yaml.Unmarshal([]byte(tt.input), &wf)
+			if err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !strings.Contains(err.Error(), tt.errPart) {
+				t.Errorf("expected error containing %q, got: %v", tt.errPart, err)
+			}
+		})
+	}
+}
+
+func TestValidateNameRequired(t *testing.T) {
+	wf := parseWorkflow(t, `
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "name is required") {
+		t.Errorf("expected 'name is required' error, got: %v", err)
+	}
+}
+
+func TestValidateNoJobs(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "at least one job") {
+		t.Errorf("expected 'at least one job' error, got: %v", err)
+	}
+}
+
+func TestValidateInvalidWorkflowDefaultsShell(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+defaults:
+  run:
+    shell: zsh
+jobs:
+  build:
+    steps:
+      - run: echo build
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "invalid defaults.run.shell") {
+		t.Errorf("expected 'invalid defaults.run.shell' error, got: %v", err)
+	}
+}
+
+func TestValidateMatrixNoKeys(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    strategy:
+      matrix: {}
+    steps:
+      - run: echo build
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "at least one key") {
+		t.Errorf("expected 'at least one key' error, got: %v", err)
+	}
+}
+
+func TestValidateMatrixParamNoValues(t *testing.T) {
+	wf := parseWorkflow(t, `
+name: test
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: []
+    steps:
+      - run: echo build
+`)
+	err := wf.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "must have values or an expression") {
+		t.Errorf("expected 'must have values or an expression' error, got: %v", err)
+	}
+}

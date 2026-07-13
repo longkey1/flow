@@ -3,6 +3,7 @@ package runner
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -198,5 +199,29 @@ func TestParseOutputFileUnclosedDelimiter(t *testing.T) {
 	}
 	if outputs["body"] != "line1\nline2" {
 		t.Errorf("expected collected lines, got %q", outputs["body"])
+	}
+}
+
+func TestParseOutputFileNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := parseOutputFile(filepath.Join(dir, "missing"))
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestParseOutputFileLineTooLong(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "output")
+	// A line longer than bufio.MaxScanTokenSize makes the scanner report an error.
+	line := "key=" + strings.Repeat("a", 1024*1024) + "\n"
+	if err := os.WriteFile(path, []byte(line), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := parseOutputFile(path)
+	if err == nil {
+		t.Fatal("expected scanner error for oversized line")
 	}
 }

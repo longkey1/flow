@@ -3,7 +3,6 @@ package runner
 import (
 	"fmt"
 	"regexp"
-	"strings"
 )
 
 var wrappedExprPattern = regexp.MustCompile(`^\s*\$\{\{\s*(.*?)\s*\}\}\s*$`)
@@ -46,13 +45,13 @@ func evaluateCondition(condition string, jobFailed bool, stepOutputs map[string]
 	if p.pos < len(p.input) {
 		return false, fmt.Errorf("evaluating condition %q: unexpected character at position %d", condition, p.pos)
 	}
-	return isTruthy(result, jobFailed), nil
+	return isTruthy(result), nil
 }
 
 // isTruthy determines if a parsed value is truthy.
 // Special status values "success", "failure", "always" are handled by the parser.
 // For string values: empty string, "false", "0" are falsy; everything else is truthy.
-func isTruthy(val condValue, jobFailed bool) bool {
+func isTruthy(val condValue) bool {
 	switch val.kind {
 	case condBool:
 		return val.boolVal
@@ -100,13 +99,6 @@ func (p *condParser) skipSpaces() {
 	}
 }
 
-func (p *condParser) peek() byte {
-	if p.pos >= len(p.input) {
-		return 0
-	}
-	return p.input[p.pos]
-}
-
 func (p *condParser) parseOr() (condValue, error) {
 	left, err := p.parseAnd()
 	if err != nil {
@@ -121,8 +113,8 @@ func (p *condParser) parseOr() (condValue, error) {
 			if err != nil {
 				return condValue{}, err
 			}
-			leftBool := isTruthy(left, p.jobFailed)
-			rightBool := isTruthy(right, p.jobFailed)
+			leftBool := isTruthy(left)
+			rightBool := isTruthy(right)
 			left = boolValue(leftBool || rightBool)
 		} else {
 			break
@@ -145,8 +137,8 @@ func (p *condParser) parseAnd() (condValue, error) {
 			if err != nil {
 				return condValue{}, err
 			}
-			leftBool := isTruthy(left, p.jobFailed)
-			rightBool := isTruthy(right, p.jobFailed)
+			leftBool := isTruthy(left)
+			rightBool := isTruthy(right)
 			left = boolValue(leftBool && rightBool)
 		} else {
 			break
@@ -195,7 +187,7 @@ func (p *condParser) parseUnary() (condValue, error) {
 		if err != nil {
 			return condValue{}, err
 		}
-		return boolValue(!isTruthy(val, p.jobFailed)), nil
+		return boolValue(!isTruthy(val)), nil
 	}
 	return p.parsePrimary()
 }
@@ -302,14 +294,4 @@ func valueToString(v condValue) string {
 	default:
 		return ""
 	}
-}
-
-// hasAlwaysCondition checks if a condition contains always() function.
-func hasAlwaysCondition(condition string) bool {
-	return strings.Contains(condition, "always()")
-}
-
-// hasFailureCondition checks if a condition contains failure() function.
-func hasFailureCondition(condition string) bool {
-	return strings.Contains(condition, "failure()")
 }

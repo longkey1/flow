@@ -268,3 +268,67 @@ runs:
 		t.Errorf("expected MY_VAR=value, got %q", a.Runs.Steps[0].Env["MY_VAR"])
 	}
 }
+
+func TestValidateInvalidDefaultsShell(t *testing.T) {
+	a := parseAction(t, `
+name: test
+defaults:
+  run:
+    shell: zsh
+runs:
+  steps:
+    - run: echo hello
+`)
+	err := a.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "invalid defaults.run.shell") {
+		t.Errorf("expected 'invalid defaults.run.shell' error, got: %v", err)
+	}
+}
+
+func TestValidateInvalidStepShell(t *testing.T) {
+	a := parseAction(t, `
+name: test
+runs:
+  steps:
+    - run: echo hello
+      shell: zsh
+`)
+	err := a.Validate()
+	if err == nil {
+		t.Fatal("expected validation error")
+	}
+	if !strings.Contains(err.Error(), "invalid shell") {
+		t.Errorf("expected 'invalid shell' error, got: %v", err)
+	}
+}
+
+func TestLoadNotFound(t *testing.T) {
+	dir := t.TempDir()
+
+	_, err := Load(filepath.Join(dir, "missing.yaml"))
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+	if !os.IsNotExist(err) {
+		t.Errorf("expected not-exist error, got: %v", err)
+	}
+}
+
+func TestLoadInvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "action.yaml")
+	if err := os.WriteFile(path, []byte("name: [unclosed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "parsing action") {
+		t.Errorf("expected 'parsing action' error, got: %v", err)
+	}
+}

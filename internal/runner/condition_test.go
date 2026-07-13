@@ -141,12 +141,12 @@ func TestConditionTruthyValues(t *testing.T) {
 		condition string
 		expected  bool
 	}{
-		{"''", false},           // empty string is falsy
-		{"'false'", false},      // "false" is falsy
-		{"'0'", false},          // "0" is falsy
-		{"'hello'", true},       // non-empty string is truthy
-		{"'true'", true},        // "true" is truthy
-		{"'1'", true},           // "1" is truthy
+		{"''", false},      // empty string is falsy
+		{"'false'", false}, // "false" is falsy
+		{"'0'", false},     // "0" is falsy
+		{"'hello'", true},  // non-empty string is truthy
+		{"'true'", true},   // "true" is truthy
+		{"'1'", true},      // "1" is truthy
 	}
 
 	for _, tt := range tests {
@@ -198,8 +198,8 @@ func TestPreprocessCondition(t *testing.T) {
 		{"${{ needs.setup.outputs.skip != 'true' }}", "needs.setup.outputs.skip != 'true'"},
 		{"${{ success() && inputs.deploy == 'true' }}", "success() && inputs.deploy == 'true'"},
 		{"${{ inputs.env }} == 'prod'", "${{ inputs.env }} == 'prod'"}, // partial - not stripped
-		{"success()", "success()"},                                     // no wrapper
-		{"  ${{  inputs.x  }}  ", "inputs.x"},                          // extra whitespace
+		{"success()", "success()"},            // no wrapper
+		{"  ${{  inputs.x  }}  ", "inputs.x"}, // extra whitespace
 	}
 	for _, tt := range tests {
 		got := preprocessCondition(tt.input)

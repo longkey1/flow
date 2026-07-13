@@ -1451,8 +1451,8 @@ func TestRunMatrixOutputsFailedNoOutputs(t *testing.T) {
 			},
 		},
 		"report": {
-			Needs:  []string{"build"},
-			If:     "always()",
+			Needs: []string{"build"},
+			If:    "always()",
 			Steps: []workflow.Step{
 				{Run: `echo "result=${{ needs.build.outputs.result }}"`},
 			},

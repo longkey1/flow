@@ -9,7 +9,7 @@ type JobResult struct {
 // Result represents the execution result of a workflow.
 type Result struct {
 	Workflow string                `json:"workflow"`
-	Status   string               `json:"status"`
+	Status   string                `json:"status"`
 	Jobs     map[string]*JobResult `json:"jobs"`
 	Outputs  map[string]string     `json:"outputs,omitempty"`
 }

@@ -34,11 +34,11 @@ var describeCmd = &cobra.Command{
 		}
 
 		out := cmd.OutOrStdout()
-		fmt.Fprintf(out, "Workflow: %s\n", wf.Name)
+		_, _ = fmt.Fprintf(out, "Workflow: %s\n", wf.Name)
 
 		if len(wf.Inputs) > 0 {
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Inputs:")
+			_, _ = fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out, "Inputs:")
 
 			names := make([]string, 0, len(wf.Inputs))
 			for name := range wf.Inputs {
@@ -52,19 +52,19 @@ var describeCmd = &cobra.Command{
 				if input.Required {
 					marker = " (required)"
 				}
-				fmt.Fprintf(out, "  %s%s\n", name, marker)
+				_, _ = fmt.Fprintf(out, "  %s%s\n", name, marker)
 				if input.Description != "" {
-					fmt.Fprintf(out, "      %s\n", input.Description)
+					_, _ = fmt.Fprintf(out, "      %s\n", input.Description)
 				}
 				if input.Default != "" {
-					fmt.Fprintf(out, "      default: %s\n", input.Default)
+					_, _ = fmt.Fprintf(out, "      default: %s\n", input.Default)
 				}
 			}
 		}
 
 		if len(wf.Outputs) > 0 {
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Outputs:")
+			_, _ = fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out, "Outputs:")
 
 			outputNames := make([]string, 0, len(wf.Outputs))
 			for name := range wf.Outputs {
@@ -73,13 +73,13 @@ var describeCmd = &cobra.Command{
 			sort.Strings(outputNames)
 
 			for _, name := range outputNames {
-				fmt.Fprintf(out, "  %s: %s\n", name, wf.Outputs[name])
+				_, _ = fmt.Fprintf(out, "  %s: %s\n", name, wf.Outputs[name])
 			}
 		}
 
 		if len(wf.Jobs) > 0 {
-			fmt.Fprintln(out)
-			fmt.Fprintln(out, "Jobs:")
+			_, _ = fmt.Fprintln(out)
+			_, _ = fmt.Fprintln(out, "Jobs:")
 			for _, jobName := range wf.JobOrder {
 				job := wf.Jobs[jobName]
 				parts := []string{}
@@ -92,26 +92,26 @@ var describeCmd = &cobra.Command{
 				if job.Uses != "" {
 					parts = append(parts, "uses: "+job.Uses)
 				}
-				fmt.Fprintf(out, "  %s", jobName)
+				_, _ = fmt.Fprintf(out, "  %s", jobName)
 				if len(parts) > 0 {
-					fmt.Fprintf(out, " (%s)", strings.Join(parts, ", "))
+					_, _ = fmt.Fprintf(out, " (%s)", strings.Join(parts, ", "))
 				}
-				fmt.Fprintln(out)
+				_, _ = fmt.Fprintln(out)
 				if job.Strategy != nil {
-					fmt.Fprintln(out, "    strategy:")
-					fmt.Fprintln(out, "      matrix:")
+					_, _ = fmt.Fprintln(out, "    strategy:")
+					_, _ = fmt.Fprintln(out, "      matrix:")
 					for k, param := range job.Strategy.Matrix {
 						if param.Expression != "" {
-							fmt.Fprintf(out, "        %s: %s\n", k, param.Expression)
+							_, _ = fmt.Fprintf(out, "        %s: %s\n", k, param.Expression)
 						} else {
-							fmt.Fprintf(out, "        %s: [%s]\n", k, join(param.Values))
+							_, _ = fmt.Fprintf(out, "        %s: [%s]\n", k, join(param.Values))
 						}
 					}
 				}
 				if job.Uses != "" && len(job.With) > 0 {
-					fmt.Fprintln(out, "    with:")
+					_, _ = fmt.Fprintln(out, "    with:")
 					for k, v := range job.With {
-						fmt.Fprintf(out, "      %s: %s\n", k, v)
+						_, _ = fmt.Fprintf(out, "      %s: %s\n", k, v)
 					}
 				}
 				for _, step := range job.Steps {
@@ -124,14 +124,14 @@ var describeCmd = &cobra.Command{
 						}
 					}
 					if step.If != "" {
-						fmt.Fprintf(out, "    - %s\n", name)
-						fmt.Fprintf(out, "        if: %s\n", step.If)
+						_, _ = fmt.Fprintf(out, "    - %s\n", name)
+						_, _ = fmt.Fprintf(out, "        if: %s\n", step.If)
 					} else {
-						fmt.Fprintf(out, "    - %s\n", name)
+						_, _ = fmt.Fprintf(out, "    - %s\n", name)
 					}
 					if step.Uses != "" && len(step.With) > 0 {
 						for k, v := range step.With {
-							fmt.Fprintf(out, "        %s: %s\n", k, v)
+							_, _ = fmt.Fprintf(out, "        %s: %s\n", k, v)
 						}
 					}
 				}

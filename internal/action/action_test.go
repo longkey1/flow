@@ -176,13 +176,17 @@ runs:
 func TestLoad(t *testing.T) {
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "my-action")
-	os.MkdirAll(actionDir, 0o755)
+	if err := os.MkdirAll(actionDir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	content := `name: my-action
 runs:
   steps:
     - run: echo hello
 `
-	os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(content), 0o644)
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	a, err := Load(filepath.Join(actionDir, "action.yaml"))
 	if err != nil {
@@ -200,7 +204,9 @@ func TestLoadValidationError(t *testing.T) {
     - run: echo hello
 `
 	path := filepath.Join(dir, "action.yaml")
-	os.WriteFile(path, []byte(content), 0o644)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	_, err := Load(path)
 	if err == nil {
@@ -214,8 +220,12 @@ func TestLoadValidationError(t *testing.T) {
 func TestFindYaml(t *testing.T) {
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "my-action")
-	os.MkdirAll(actionDir, 0o755)
-	os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(""), 0o644)
+	if err := os.MkdirAll(actionDir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	path, err := Find(dir, "my-action")
 	if err != nil {
@@ -230,8 +240,12 @@ func TestFindYaml(t *testing.T) {
 func TestFindYml(t *testing.T) {
 	dir := t.TempDir()
 	actionDir := filepath.Join(dir, "my-action")
-	os.MkdirAll(actionDir, 0o755)
-	os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(""), 0o644)
+	if err := os.MkdirAll(actionDir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yml"), []byte(""), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 
 	path, err := Find(dir, "my-action")
 	if err != nil {

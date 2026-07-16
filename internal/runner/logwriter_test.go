@@ -15,10 +15,10 @@ func TestPrefixedWriterCompleteLine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "build/Compile")
-	pw.Write([]byte("hello world\n"))
+	_, _ = pw.Write([]byte("hello world\n"))
 
 	data, _ := os.ReadFile(lf.Path())
 	line := string(data)
@@ -37,10 +37,10 @@ func TestPrefixedWriterStderrNoTag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "build/Deploy")
-	pw.Write([]byte("error occurred\n"))
+	_, _ = pw.Write([]byte("error occurred\n"))
 
 	data, _ := os.ReadFile(lf.Path())
 	line := string(data)
@@ -58,19 +58,19 @@ func TestPrefixedWriterPartialLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "job/step")
 
 	// Write partial line
-	pw.Write([]byte("hel"))
+	_, _ = pw.Write([]byte("hel"))
 	data, _ := os.ReadFile(lf.Path())
 	if len(data) != 0 {
 		t.Errorf("expected no output for partial line, got: %s", data)
 	}
 
 	// Complete the line
-	pw.Write([]byte("lo\n"))
+	_, _ = pw.Write([]byte("lo\n"))
 	data, _ = os.ReadFile(lf.Path())
 	if !strings.Contains(string(data), "[job/step] hello") {
 		t.Errorf("expected complete line after newline, got: %s", data)
@@ -83,10 +83,10 @@ func TestPrefixedWriterMultipleLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "job/step")
-	pw.Write([]byte("line1\nline2\nline3\n"))
+	_, _ = pw.Write([]byte("line1\nline2\nline3\n"))
 
 	data, _ := os.ReadFile(lf.Path())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
@@ -107,10 +107,10 @@ func TestPrefixedWriterFlush(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "job/step")
-	pw.Write([]byte("no newline"))
+	_, _ = pw.Write([]byte("no newline"))
 
 	// Should have no output yet
 	data, _ := os.ReadFile(lf.Path())
@@ -119,7 +119,7 @@ func TestPrefixedWriterFlush(t *testing.T) {
 	}
 
 	// Flush should write the remaining buffer
-	pw.Flush()
+	_ = pw.Flush()
 	data, _ = os.ReadFile(lf.Path())
 	if !strings.Contains(string(data), "[job/step] no newline") {
 		t.Errorf("expected flushed line, got: %s", data)
@@ -132,7 +132,7 @@ func TestPrefixedWriterFlushEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "job/step")
 	if err := pw.Flush(); err != nil {
@@ -146,7 +146,7 @@ func TestPrefixedWriterConcurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	pw := NewPrefixedWriter(lf, "job/step")
 
@@ -156,12 +156,12 @@ func TestPrefixedWriterConcurrent(t *testing.T) {
 		go func(n int) {
 			defer wg.Done()
 			for j := 0; j < 10; j++ {
-				pw.Write([]byte("line\n"))
+				_, _ = pw.Write([]byte("line\n"))
 			}
 		}(i)
 	}
 	wg.Wait()
-	pw.Flush()
+	_ = pw.Flush()
 
 	data, _ := os.ReadFile(lf.Path())
 	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
@@ -178,7 +178,7 @@ func TestLogFileCreate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lf.Close()
+	defer func() { _ = lf.Close() }()
 
 	path := lf.Path()
 	if !strings.Contains(path, "-deploy.log") {
@@ -201,9 +201,9 @@ func TestLogFileWrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	lf.Write([]byte("hello"))
-	lf.Write([]byte(" world"))
-	lf.Close()
+	_, _ = lf.Write([]byte("hello"))
+	_, _ = lf.Write([]byte(" world"))
+	_ = lf.Close()
 
 	data, _ := os.ReadFile(lf.Path())
 	if string(data) != "hello world" {
@@ -217,10 +217,10 @@ func TestRotateLogsKeepsNewest(t *testing.T) {
 	// Create 5 log files with different times
 	for i := 0; i < 5; i++ {
 		name := filepath.Join(dir, "test-"+strings.Repeat("0", i)+".log")
-		os.WriteFile(name, []byte("data"), 0o644)
+		_ = os.WriteFile(name, []byte("data"), 0o644)
 		// Set modification time so files are ordered
 		modTime := time.Now().Add(time.Duration(i) * time.Second)
-		os.Chtimes(name, modTime, modTime)
+		_ = os.Chtimes(name, modTime, modTime)
 	}
 
 	if err := RotateLogs(dir, 3); err != nil {
@@ -245,7 +245,7 @@ func TestRotateLogsNoopWhenUnderLimit(t *testing.T) {
 
 	for i := 0; i < 3; i++ {
 		name := filepath.Join(dir, "test-"+strings.Repeat("0", i)+".log")
-		os.WriteFile(name, []byte("data"), 0o644)
+		_ = os.WriteFile(name, []byte("data"), 0o644)
 	}
 
 	if err := RotateLogs(dir, 5); err != nil {
@@ -271,11 +271,11 @@ func TestRotateLogsIgnoresNonLogFiles(t *testing.T) {
 	// Create log files and non-log files
 	for i := 0; i < 5; i++ {
 		name := filepath.Join(dir, "test-"+strings.Repeat("0", i)+".log")
-		os.WriteFile(name, []byte("data"), 0o644)
+		_ = os.WriteFile(name, []byte("data"), 0o644)
 		modTime := time.Now().Add(time.Duration(i) * time.Second)
-		os.Chtimes(name, modTime, modTime)
+		_ = os.Chtimes(name, modTime, modTime)
 	}
-	os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("keep"), 0o644)
+	_ = os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("keep"), 0o644)
 
 	if err := RotateLogs(dir, 2); err != nil {
 		t.Fatal(err)
@@ -341,7 +341,7 @@ func TestPrefixedWriterWriteAfterClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	lf.Close()
+	_ = lf.Close()
 
 	pw := NewPrefixedWriter(lf, "job")
 	if _, err := pw.Write([]byte("line\n")); err == nil {

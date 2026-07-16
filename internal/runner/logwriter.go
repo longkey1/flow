@@ -150,7 +150,7 @@ func RotateLogs(logsDir string, maxRuns int) error {
 
 	// Delete files beyond maxRuns
 	for _, l := range logs[maxRuns:] {
-		os.Remove(filepath.Join(logsDir, l.name))
+		_ = os.Remove(filepath.Join(logsDir, l.name))
 	}
 
 	return nil

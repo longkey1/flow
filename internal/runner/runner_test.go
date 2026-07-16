@@ -15,8 +15,12 @@ import (
 func writeAction(t *testing.T, dir, name, content string) {
 	t.Helper()
 	actionDir := filepath.Join(dir, name)
-	os.MkdirAll(actionDir, 0o755)
-	os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(content), 0o644)
+	if err := os.MkdirAll(actionDir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(actionDir, "action.yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func makeWorkflow(t *testing.T, jobs map[string]workflow.Job, order []string) *workflow.Workflow {
@@ -861,8 +865,12 @@ func TestRunJobOutputsUnknownReturnsEmpty(t *testing.T) {
 
 func writeWorkflow(t *testing.T, dir, name, content string) {
 	t.Helper()
-	os.MkdirAll(dir, 0o755)
-	os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content), 0o644)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name+".yaml"), []byte(content), 0o644); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestRunSubWorkflowBasic(t *testing.T) {
@@ -1604,7 +1612,7 @@ func TestRunStepIfSkippedDisplay(t *testing.T) {
 		}},
 	}, []string{"build"})
 
-	r.Run(wf, nil)
+	_ = r.Run(wf, nil)
 	out := stdout.String()
 	if !strings.Contains(out, "Step: Normal Step (skipped)") {
 		t.Errorf("expected Normal Step to be skipped, got:\n%s", out)

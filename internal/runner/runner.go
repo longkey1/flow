@@ -47,17 +47,17 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 		if err != nil {
 			return err
 		}
-		defer logFile.Close()
+		defer func() { _ = logFile.Close() }()
 	}
 
 	rr, err := r.run(wf, inputs, 0, logFile)
 
 	if logFile != nil {
 		if !r.Quiet {
-			fmt.Fprintf(r.stdout, "\nLog: %s\n", logFile.Path())
+			_, _ = fmt.Fprintf(r.stdout, "\nLog: %s\n", logFile.Path())
 		}
 		if rotErr := RotateLogs(r.LogDir, r.LogMaxRuns); rotErr != nil {
-			fmt.Fprintf(r.stderr, "warning: log rotation failed: %v\n", rotErr)
+			_, _ = fmt.Fprintf(r.stderr, "warning: log rotation failed: %v\n", rotErr)
 		}
 	}
 
@@ -147,7 +147,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 				// Evaluate job-level if condition
 				shouldRun, err := evaluateCondition(job.If, anyDepFailed, nil, resolvedInputs, copyJobOutputs(jobOutputs), nil)
 				if err != nil {
-					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
+					_, _ = fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
 					status[jobName] = "failed"
 					failedJobs = append(failedJobs, jobName)
 					mu.Unlock()
@@ -168,7 +168,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 					var buf bytes.Buffer
 					fmt.Fprintf(&buf, "[%s] Job: %s (skipped)\n", jobName, jobName)
 					mu.Lock()
-					buf.WriteTo(r.stdout)
+					_, _ = buf.WriteTo(r.stdout)
 					mu.Unlock()
 				}
 				return
@@ -187,7 +187,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 					values, err := resolveMatrixParam(param, resolvedInputs, currentJobOutputs)
 					if err != nil {
 						mu.Lock()
-						fmt.Fprintf(r.stderr, "job %q: resolving matrix param %q: %v\n", jobName, key, err)
+						_, _ = fmt.Fprintf(r.stderr, "job %q: resolving matrix param %q: %v\n", jobName, key, err)
 						status[jobName] = "failed"
 						failedJobs = append(failedJobs, jobName)
 						mu.Unlock()
@@ -259,8 +259,8 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 								matrixMu.Unlock()
 							}
 							mu.Lock()
-							stdoutBuf.WriteTo(r.stdout)
-							stderrBuf.WriteTo(r.stderr)
+							_, _ = stdoutBuf.WriteTo(r.stdout)
+							_, _ = stderrBuf.WriteTo(r.stderr)
 							mu.Unlock()
 						} else {
 							var stdoutBuf, stderrBuf bytes.Buffer
@@ -280,8 +280,8 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 							}
 
 							mu.Lock()
-							stdoutBuf.WriteTo(r.stdout)
-							stderrBuf.WriteTo(r.stderr)
+							_, _ = stdoutBuf.WriteTo(r.stdout)
+							_, _ = stderrBuf.WriteTo(r.stderr)
 							mu.Unlock()
 
 							if failed {
@@ -346,7 +346,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 					var buf bytes.Buffer
 					fmt.Fprintf(&buf, "[%s] Job: %s (uses: %s)\n", jobName, jobName, job.Uses)
 					mu.Lock()
-					buf.WriteTo(r.stdout)
+					_, _ = buf.WriteTo(r.stdout)
 					mu.Unlock()
 				}
 
@@ -357,7 +357,7 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 				subResult, err := r.runSubWorkflow(job, wf.Env, resolvedInputs, currentJobOutputs, nil, depth, logFile)
 				mu.Lock()
 				if err != nil {
-					fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
+					_, _ = fmt.Fprintf(r.stderr, "job %q: %v\n", jobName, err)
 					status[jobName] = "failed"
 					failedJobs = append(failedJobs, jobName)
 				} else {
@@ -396,8 +396,8 @@ func (r *Runner) run(wf *workflow.Workflow, inputs map[string]string, depth int,
 
 			// Flush buffers and update status atomically
 			mu.Lock()
-			stdoutBuf.WriteTo(r.stdout)
-			stderrBuf.WriteTo(r.stderr)
+			_, _ = stdoutBuf.WriteTo(r.stdout)
+			_, _ = stderrBuf.WriteTo(r.stderr)
 			if jobFailed {
 				status[jobName] = "failed"
 				failedJobs = append(failedJobs, jobName)
@@ -471,32 +471,32 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string,
 			shouldRun, err := evaluateCondition(step.If, jobFailed, stepOutputs, resolvedInputs, jobOutputs, matrixValues)
 			if err != nil {
 				jobFailed = true
-				fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
+				_, _ = fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 				continue
 			}
 			if !shouldRun {
 				if !r.Quiet {
-					fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
+					_, _ = fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
 				}
 				continue
 			}
 		} else if jobFailed {
 			// Default behavior: skip when previous steps failed (same as success())
 			if !r.Quiet {
-				fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
+				_, _ = fmt.Fprintf(stepStdout, "Step: %s (skipped)\n", name)
 			}
 			continue
 		}
 
 		if !r.Quiet {
-			fmt.Fprintf(stepStdout, "Step: %s\n", name)
+			_, _ = fmt.Fprintf(stepStdout, "Step: %s\n", name)
 		}
 
 		if step.Uses != "" {
 			outputs, err := r.runActionBuffered(step, jobEnv, stepOutputs, resolvedInputs, jobOutputs, matrixValues, stdout, stderr, logFile, jobPrefix, name)
 			if err != nil {
 				jobFailed = true
-				fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
+				_, _ = fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 				continue
 			}
 			if step.Id != "" {
@@ -509,11 +509,11 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string,
 		outputFile, err := os.CreateTemp("", "flow-output-*")
 		if err != nil {
 			jobFailed = true
-			fmt.Fprintf(stepStderr, "job %q, step %q: creating output file: %v\n", jobName, name, err)
+			_, _ = fmt.Fprintf(stepStderr, "job %q, step %q: creating output file: %v\n", jobName, name, err)
 			continue
 		}
 		outputPath := outputFile.Name()
-		outputFile.Close()
+		_ = outputFile.Close()
 
 		// Expand expressions in the command
 		command := expandExpressions(step.Run, stepOutputs, resolvedInputs, jobOutputs, matrixValues)
@@ -537,9 +537,9 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string,
 		if err := runShell(command, r.dir, shell, r.stdin, shellStdout, shellStderr, env); err != nil {
 			flushPrefixedWriter(shellStdout)
 			flushPrefixedWriter(shellStderr)
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			jobFailed = true
-			fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
+			_, _ = fmt.Fprintf(stepStderr, "job %q, step %q: %v\n", jobName, name, err)
 			continue
 		}
 
@@ -550,14 +550,14 @@ func (r *Runner) runJobSteps(job workflow.Job, jobName string, jobPrefix string,
 		if step.Id != "" {
 			outputs, err := parseOutputFile(outputPath)
 			if err != nil {
-				os.Remove(outputPath)
+				_ = os.Remove(outputPath)
 				jobFailed = true
-				fmt.Fprintf(stepStderr, "job %q, step %q: parsing output: %v\n", jobName, name, err)
+				_, _ = fmt.Fprintf(stepStderr, "job %q, step %q: parsing output: %v\n", jobName, name, err)
 				continue
 			}
 			stepOutputs[step.Id] = outputs
 		}
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 	}
 
 	return stepOutputs, jobFailed
@@ -665,7 +665,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 
 		// Show sub-step name on screen when logging is enabled
 		if logFile != nil && !r.Quiet {
-			fmt.Fprintf(subStepStdout, "> %s\n", subStepName)
+			_, _ = fmt.Fprintf(subStepStdout, "> %s\n", subStepName)
 		}
 
 		// Create temp file for FLOW_OUTPUT
@@ -674,7 +674,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 			return nil, fmt.Errorf("creating output file: %w", err)
 		}
 		outputPath := outputFile.Name()
-		outputFile.Close()
+		_ = outputFile.Close()
 
 		// Expand expressions: inputs.X → actionInputs, steps.X.outputs.Y → action step outputs
 		command := expandExpressions(actionStep.Run, actionStepOutputs, actionInputs, nil, nil)
@@ -700,7 +700,7 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		if err := runShell(command, r.dir, shell, r.stdin, shellStdout, shellStderr, env); err != nil {
 			flushPrefixedWriter(shellStdout)
 			flushPrefixedWriter(shellStderr)
-			os.Remove(outputPath)
+			_ = os.Remove(outputPath)
 			return nil, err
 		}
 
@@ -711,12 +711,12 @@ func (r *Runner) runActionBuffered(step workflow.Step, jobEnv map[string]string,
 		if actionStep.Id != "" {
 			outputs, err := parseOutputFile(outputPath)
 			if err != nil {
-				os.Remove(outputPath)
+				_ = os.Remove(outputPath)
 				return nil, fmt.Errorf("parsing output for action step %q: %w", actionStep.Id, err)
 			}
 			actionStepOutputs[actionStep.Id] = outputs
 		}
-		os.Remove(outputPath)
+		_ = os.Remove(outputPath)
 	}
 
 	// Merge all action step outputs into a single map for the calling step
@@ -748,7 +748,7 @@ func (r *Runner) wrapWriters(stdout, stderr io.Writer, logFile *LogFile, prefix 
 // flushPrefixedWriter flushes a writer if it is a *PrefixedWriter or wraps one.
 func flushPrefixedWriter(w io.Writer) {
 	if pw, ok := w.(*PrefixedWriter); ok {
-		pw.Flush()
+		_ = pw.Flush()
 		return
 	}
 	// Handle io.MultiWriter: check if underlying writers include a PrefixedWriter.
@@ -758,7 +758,7 @@ func flushPrefixedWriter(w io.Writer) {
 		Flush() error
 	}
 	if f, ok := w.(flusher); ok {
-		f.Flush()
+		_ = f.Flush()
 	}
 }
 

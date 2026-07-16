@@ -45,10 +45,10 @@ var listCmd = &cobra.Command{
 
 			wf, err := workflow.Load(path)
 			if err != nil {
-				fmt.Fprintf(out, "  %s (invalid: %v)\n", name, err)
+				_, _ = fmt.Fprintf(out, "  %s (invalid: %v)\n", name, err)
 				continue
 			}
-			fmt.Fprintf(out, "  %s - %s\n", name, wf.Name)
+			_, _ = fmt.Fprintf(out, "  %s - %s\n", name, wf.Name)
 		}
 
 		return nil

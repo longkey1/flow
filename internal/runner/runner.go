@@ -35,9 +35,12 @@ func New(stdin io.Reader, stdout, stderr io.Writer, dir string) *Runner {
 }
 
 func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
+	// In JSON mode, stdout carries only the result JSON; narration and
+	// step output are routed to stderr instead.
 	jsonOutput := r.Format == "json"
+	resultOut := r.stdout
 	if jsonOutput {
-		r.Quiet = true
+		r.stdout = r.stderr
 	}
 
 	var logFile *LogFile
@@ -80,7 +83,7 @@ func (r *Runner) Run(wf *workflow.Workflow, inputs map[string]string) error {
 		} else {
 			result.Status = "success"
 		}
-		enc := json.NewEncoder(r.stdout)
+		enc := json.NewEncoder(resultOut)
 		enc.SetIndent("", "  ")
 		if encErr := enc.Encode(result); encErr != nil {
 			return encErr

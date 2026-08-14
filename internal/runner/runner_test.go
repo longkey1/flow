@@ -1812,6 +1812,9 @@ func TestRunJSONFormat(t *testing.T) {
 	if result.Outputs["version"] != "1.2.3" {
 		t.Errorf("expected workflow output version=1.2.3, got %v", result.Outputs)
 	}
+	if !strings.Contains(stderr.String(), "Job: build") {
+		t.Errorf("expected narration on stderr, got:\n%s", stderr.String())
+	}
 }
 
 func TestRunJSONFormatFailure(t *testing.T) {

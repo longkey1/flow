@@ -601,7 +601,7 @@ Merge order: **workflow env** -> **job env** -> **step env** (later levels take 
 
 ## JSON Output
 
-Use `--format json` to get structured output instead of the default text format. When JSON format is enabled, all human-readable log headers are suppressed and a JSON object is written to stdout after the workflow completes:
+Use `--format json` to get structured output instead of the default text format. When JSON format is enabled, a JSON object is written to stdout after the workflow completes, while human-readable narration (job/step log headers and step output) is routed to stderr. This keeps stdout safe to pipe or parse. The `quiet` workflow option still applies to the stderr narration:
 
 ```bash
 flow run build --format json
